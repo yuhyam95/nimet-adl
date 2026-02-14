@@ -1,0 +1,20 @@
+{
+  "name": "nimet-adl-backend",
+  "version": "1.0.0",
+  "description": "Backend for NiMet Automated Data Loader",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/server.js",
+    "sync": "node src/index.js"
+  },
+  "author": "Yusuf Habu",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.13.5",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "pg": "^8.18.0"
+  }
+}
