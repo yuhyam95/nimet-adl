@@ -35,8 +35,8 @@ const syncData = async (shouldClosePool = false) => {
             throw new Error('Failed to fetch data loggers list');
         }
 
-        const loggers = loggersResponse.data.filter(l => l.isActive); // Only sync active loggers
-        console.log(`Found ${loggers.length} active data loggers.`);
+        const loggers = loggersResponse.data; // Sync metadata for ALL loggers
+        console.log(`Found ${loggers.length} total data loggers.`);
 
         for (const logger of loggers) {
             try {
@@ -72,7 +72,11 @@ const syncData = async (shouldClosePool = false) => {
 
                 await db.query(upsertStationQuery, stationParams);
 
-                console.log(`Processing Station: ${logger.stationName} (${logger._id})`);
+                console.log(`Synced metadata for Station: ${logger.stationName} (${logger._id}) [Active: ${logger.isActive}]`);
+
+                if (!logger.isActive) {
+                    continue; // Skip fetching weather data for inactive stations
+                }
 
                 const apiResponse = await apiService.fetchWeatherData(startDate, endDate, logger._id);
 

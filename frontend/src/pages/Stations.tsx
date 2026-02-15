@@ -24,6 +24,7 @@ interface Station {
     station_name: string;
     latitude: number;
     longitude: number;
+    organization?: string;
     last_reading_at: string;
 }
 
@@ -86,6 +87,7 @@ const Stations = () => {
                             <tr>
                                 <th>Station Name</th>
                                 <th>Coordinates</th>
+                                <th>Organization</th>
                                 <th>Latest Reading</th>
                                 <th>Status</th>
                             </tr>
@@ -104,6 +106,7 @@ const Stations = () => {
                                             </Link>
                                         </td>
                                         <td>{station.latitude}, {station.longitude}</td>
+                                        <td>{station.organization || '-'}</td>
                                         <td className={styles.lastUpdate}>
                                             {lastUpdate.toLocaleString()}
                                         </td>
