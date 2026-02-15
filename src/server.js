@@ -67,23 +67,28 @@ app.get('/api/weather', async (req, res) => {
 app.get('/api/dataloggers', async (req, res) => {
     try {
         const query = `
-      SELECT DISTINCT ON (station_id) 
-        station_id, 
-        station_name, 
-        latitude, 
-        longitude,
-        air_temperature,
-        relative_humidity,
-        wind_speed,
-        wind_direction,
-        precipitation,
-        solar_radiation,
-        atmospheric_pressure,
-        soil_temperature,
-        battery_voltage,
-        timestamp as last_reading_at
-      FROM weather_readings
-      ORDER BY station_id, timestamp DESC;
+      SELECT DISTINCT ON (wr.station_id) 
+        wr.station_id, 
+        wr.station_name, 
+        wr.latitude, 
+        wr.longitude,
+        wr.air_temperature,
+        wr.relative_humidity,
+        wr.wind_speed,
+        wr.wind_direction,
+        wr.precipitation,
+        wr.solar_radiation,
+        wr.atmospheric_pressure,
+        wr.soil_temperature,
+        wr.battery_voltage,
+        wr.timestamp as last_reading_at,
+        s.model,
+        s.location_type,
+        s.organization,
+        s.country
+      FROM weather_readings wr
+      LEFT JOIN stations s ON wr.station_id = s.station_id
+      ORDER BY wr.station_id, wr.timestamp DESC;
     `;
 
         const result = await db.query(query);

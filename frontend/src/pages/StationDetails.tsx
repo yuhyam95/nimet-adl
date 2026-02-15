@@ -14,7 +14,22 @@ import {
     ResponsiveContainer
 } from 'recharts';
 import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
 import styles from './StationDetails.module.css';
+
+// Fix for Leaflet default marker icon in Vite/React
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+
+const DefaultIcon = L.icon({
+    iconUrl: icon,
+    shadowUrl: iconShadow,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41]
+});
+
+L.Marker.prototype.options.icon = DefaultIcon;
 
 interface WeatherReading {
     id: number;
@@ -36,6 +51,10 @@ interface Station {
     station_name: string;
     latitude: number;
     longitude: number;
+    model?: string;
+    location_type?: string;
+    organization?: string;
+    country?: string;
     last_reading_at: string;
 }
 
@@ -241,6 +260,53 @@ const StationDetails = () => {
             </div>
 
             <div className={styles.chartsGrid}>
+                {/* Station Overview & Map */}
+                <div className={styles.chartCard} style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px' }}>
+                        <div style={{ flex: '1', minWidth: '250px' }}>
+                            <h3>Station Information</h3>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '12px 24px', marginTop: '16px' }}>
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Data Logger Model:</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.model || 'N/A'}</div>
+
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Location Type:</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.location_type || 'Point'}</div>
+
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Organization:</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.organization || 'N/A'}</div>
+
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Coordinates:</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.latitude}, {station.longitude}</div>
+
+                                {station.country && (
+                                    <>
+                                        <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Country:</div>
+                                        <div style={{ fontWeight: 500, color: '#111827' }}>{station.country}</div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <div style={{ flex: '1', minWidth: '300px', height: '250px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+                            <MapContainer
+                                center={[station.latitude, station.longitude]}
+                                zoom={13}
+                                style={{ height: '100%', width: '100%' }}
+                            >
+                                <TileLayer
+                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                />
+                                <Marker position={[station.latitude, station.longitude]}>
+                                    <Popup>
+                                        <strong>{station.station_name}</strong>
+                                    </Popup>
+                                </Marker>
+                            </MapContainer>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Temperature Chart */}
                 <div className={styles.chartCard}>
                     <h3>Temperature History</h3>

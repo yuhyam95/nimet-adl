@@ -1,8 +1,26 @@
 const db = require('./db/index.js');
 const apiService = require('./services/api.js');
+require('dotenv').config();
 
 const syncData = async (shouldClosePool = false) => {
     try {
+        // Ensure stations table exists
+        const createStationsTableQuery = `
+            CREATE TABLE IF NOT EXISTS stations (
+                station_id VARCHAR(255) PRIMARY KEY,
+                station_name VARCHAR(255),
+                latitude NUMERIC,
+                longitude NUMERIC,
+                model VARCHAR(255),
+                location_type VARCHAR(255),
+                organization VARCHAR(255),
+                country VARCHAR(255),
+                last_reading_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+        await db.query(createStationsTableQuery);
+
         // Determine the date range (e.g., today)
         const today = new Date().toISOString().split('T')[0];
         const startDate = today;
@@ -22,7 +40,39 @@ const syncData = async (shouldClosePool = false) => {
 
         for (const logger of loggers) {
             try {
-                // console.log(`\nProcessing Station: ${logger.stationName} (${logger._id})`);
+                // Upsert station metadata
+                const stationParams = [
+                    logger._id,
+                    logger.stationName,
+                    logger.location?.coordinates?.[1], // Latitude (y)
+                    logger.location?.coordinates?.[0], // Longitude (x)
+                    logger.dataLoggerModel,
+                    logger.location?.type,
+                    logger.organization?.name,
+                    logger.location?.country,
+                    logger.lastReading
+                ];
+
+                const upsertStationQuery = `
+                    INSERT INTO stations (
+                        station_id, station_name, latitude, longitude, 
+                        model, location_type, organization, country, last_reading_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    ON CONFLICT (station_id) DO UPDATE SET
+                        station_name = EXCLUDED.station_name,
+                        latitude = EXCLUDED.latitude,
+                        longitude = EXCLUDED.longitude,
+                        model = EXCLUDED.model,
+                        location_type = EXCLUDED.location_type,
+                        organization = EXCLUDED.organization,
+                        country = EXCLUDED.country,
+                        last_reading_at = EXCLUDED.last_reading_at,
+                        updated_at = NOW();
+                `;
+
+                await db.query(upsertStationQuery, stationParams);
+
+                console.log(`Processing Station: ${logger.stationName} (${logger._id})`);
 
                 const apiResponse = await apiService.fetchWeatherData(startDate, endDate, logger._id);
 
@@ -33,32 +83,9 @@ const syncData = async (shouldClosePool = false) => {
 
                 const { stationName, dataLoggerId, location, readings } = apiResponse.data;
 
-                // console.log(`  > Found ${readings.length} readings.`);
-
                 if (readings.length === 0) continue;
 
-                // Improved Table Schema
-                /*
-                CREATE TABLE weather_readings (
-                    id SERIAL PRIMARY KEY,
-                    station_name VARCHAR(255),
-                    station_id VARCHAR(255),
-                    latitude NUMERIC,
-                    longitude NUMERIC,
-                    timestamp TIMESTAMP,
-                    air_temperature NUMERIC,
-                    relative_humidity NUMERIC,
-                    wind_speed NUMERIC,
-                    wind_direction NUMERIC,
-                    precipitation NUMERIC,
-                    solar_radiation NUMERIC,
-                    atmospheric_pressure NUMERIC,
-                    soil_temperature NUMERIC,
-                    battery_voltage NUMERIC,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-                */
-
+                // Improved Table Schema (weather_readings) - handled elsewhere or assumed existing
                 const insertQuery = `
       INSERT INTO weather_readings (
         station_name, station_id, latitude, longitude, timestamp,
