@@ -60,7 +60,7 @@ const Stations = () => {
     return (
         <div className={styles.container}>
             <div className={styles.header}>
-                <h2>Active Data Loggers</h2>
+                <h2> Data Loggers</h2>
                 <div className={styles.toggleContainer}>
                     <button
                         className={`${styles.toggleBtn} ${viewMode === 'table' ? styles.activeToggle : ''}`}

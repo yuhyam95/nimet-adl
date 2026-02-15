@@ -13,7 +13,7 @@ import {
     Legend,
     ResponsiveContainer
 } from 'recharts';
-import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw } from 'lucide-react';
 import styles from './StationDetails.module.css';
 
 interface WeatherReading {
@@ -50,65 +50,97 @@ const StationDetails = () => {
         maxWindSpeed: 0
     });
 
+    const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
+    const [isFiltered, setIsFiltered] = useState(false);
+
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
-    useEffect(() => {
-        const fetchStationData = async () => {
-            if (!id) return;
+    const fetchStationData = async (forceFilterString = '') => {
+        if (!id) return;
 
-            try {
-                // Fetch station details (from all stations for now)
-                const stationsRes = await axios.get('/api/dataloggers');
-                if (stationsRes.data.success) {
-                    const foundStation = stationsRes.data.data.find((s: Station) => s.station_id === id);
-                    if (foundStation) {
-                        setStation(foundStation);
-                    }
+        try {
+            // Fetch station details (from all stations for now)
+            const stationsRes = await axios.get('/api/dataloggers');
+            if (stationsRes.data.success) {
+                const foundStation = stationsRes.data.data.find((s: Station) => s.station_id === id);
+                if (foundStation) {
+                    setStation(foundStation);
                 }
-
-                // Fetch weather history for this station
-                const weatherRes = await axios.get(`/api/weather?stationId=${id}&limit=500`);
-                if (weatherRes.data.success) {
-                    const data = weatherRes.data.data;
-                    const sortedForChart = [...data].reverse();
-                    setReadings(sortedForChart);
-
-                    // Compute stats
-                    if (data.length > 0) {
-                        const totalTemp = data.reduce((acc: number, r: WeatherReading) => acc + Number(r.air_temperature), 0);
-                        const totalHum = data.reduce((acc: number, r: WeatherReading) => acc + Number(r.relative_humidity), 0);
-                        const maxWind = Math.max(...data.map((r: WeatherReading) => Number(r.wind_speed)));
-
-                        setStats({
-                            avgTemp: totalTemp / data.length,
-                            avgHumidity: totalHum / data.length,
-                            maxWindSpeed: maxWind
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error("Error fetching station details", error);
-            } finally {
-                setLoading(false);
             }
-        };
 
+            // Build query
+            let query = `/api/weather?stationId=${id}`;
+
+            if (forceFilterString && forceFilterString !== 'RESET') {
+                query += forceFilterString;
+                query += `&limit=10000`; // Get all for the range
+            } else {
+                query += `&limit=500`; // Default latest
+            }
+
+            const weatherRes = await axios.get(query);
+            if (weatherRes.data.success) {
+                const data = weatherRes.data.data;
+                const sortedForChart = [...data].reverse();
+                setReadings(sortedForChart);
+
+                // Compute stats
+                if (data.length > 0) {
+                    const totalTemp = data.reduce((acc: number, r: WeatherReading) => acc + Number(r.air_temperature), 0);
+                    const totalHum = data.reduce((acc: number, r: WeatherReading) => acc + Number(r.relative_humidity), 0);
+                    const maxWind = Math.max(...data.map((r: WeatherReading) => Number(r.wind_speed)));
+
+                    setStats({
+                        avgTemp: totalTemp / data.length,
+                        avgHumidity: totalHum / data.length,
+                        maxWindSpeed: maxWind
+                    });
+                } else {
+                    setStats({ avgTemp: 0, avgHumidity: 0, maxWindSpeed: 0 });
+                }
+            }
+        } catch (error) {
+            console.error("Error fetching station details", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        // Initial load
         fetchStationData();
-        // Poll every 30 seconds
-        const interval = setInterval(fetchStationData, 30000);
+
+        // Poll every 30 seconds ONLY if not filtered
+        const interval = setInterval(() => {
+            if (!isFiltered) {
+                fetchStationData();
+            }
+        }, 30000);
+
         return () => clearInterval(interval);
-    }, [id]);
+    }, [id, isFiltered]);
+
+    const handleFilter = () => {
+        if (dateFilter.start && dateFilter.end) {
+            setIsFiltered(true);
+            setCurrentPage(1);
+            // Append end of day to end date
+            const endDateTime = `${dateFilter.end}T23:59:59`;
+            const queryString = `&startDate=${dateFilter.start}&endDate=${endDateTime}`;
+            fetchStationData(queryString);
+        }
+    };
+
+    const handleReset = () => {
+        setDateFilter({ start: '', end: '' });
+        setIsFiltered(false);
+        setCurrentPage(1);
+        fetchStationData('RESET');
+    };
 
     // Pagination logic
-    // readings is sorted ascending for charts (oldest -> newest), we want table to show newest first?
-    // Actually `readings` state says `sortedForChart` which is `[...data].reverse()`.
-    // API returns `ORDER BY timestamp DESC` (newest first).
-    // So `data` (from API) is Newest -> Oldest.
-    // `sortedForChart` (assigned to `readings`) is Oldest -> Newest.
-    // So for Table, we want Newest -> Oldest. So we should reverse `readings` or use original `data` order.
-    // Let's reverse a copy for the table.
     const readingsForTable = [...readings].reverse();
     const totalPages = Math.ceil(readingsForTable.length / itemsPerPage);
     const paginatedReadings = readingsForTable.slice(
@@ -122,8 +154,56 @@ const StationDetails = () => {
         }
     };
 
+    const downloadCSV = () => {
+        if (!readingsForTable.length) return;
+
+        const headers = [
+            "Timestamp",
+            "Station Name",
+            "Air Temperature (°C)",
+            "Relative Humidity (%)",
+            "Wind Speed (m/s)",
+            "Wind Direction (°)",
+            "Precipitation (mm)",
+            "Solar Radiation (W)",
+            "Atmospheric Pressure (hPa)",
+            "Soil Temperature (°C)",
+            "Battery Voltage (V)"
+        ];
+
+        const csvContent = [
+            headers.join(","),
+            ...readingsForTable.map(r => [
+                `"${new Date(r.timestamp).toLocaleString()}"`, // Quote timestamp to handle commas
+                `"${r.station_name || station?.station_name || ''}"`,
+                r.air_temperature,
+                r.relative_humidity,
+                r.wind_speed,
+                r.wind_direction ?? '',
+                r.precipitation ?? '',
+                r.solar_radiation ?? '',
+                r.atmospheric_pressure ?? '',
+                r.soil_temperature ?? '',
+                r.battery_voltage ?? ''
+            ].join(","))
+        ].join("\n");
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `${station?.station_name || 'station'}_weather_data.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     if (loading) return <div>Loading station details...</div>;
     if (!station) return <div>Station not found</div>;
+
+    const lastUpdate = new Date(station.last_reading_at);
+    const isOnline = (new Date().getTime() - lastUpdate.getTime()) < 3 * 60 * 60 * 1000;
 
     return (
         <div className={styles.container}>
@@ -142,11 +222,22 @@ const StationDetails = () => {
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <Clock size={16} />
-                            Last updated: {new Date(station.last_reading_at).toLocaleString()}
+                            Last updated: {lastUpdate.toLocaleString()}
                         </span>
                     </div>
                 </div>
-                <div className={styles.statusBadge}>Active</div>
+
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <div
+                        className={styles.statusBadge}
+                        style={{
+                            backgroundColor: isOnline ? '#d1fae5' : '#f3f4f6',
+                            color: isOnline ? '#065f46' : '#374151'
+                        }}
+                    >
+                        {isOnline ? 'Active' : 'Inactive'}
+                    </div>
+                </div>
             </div>
 
             <div className={styles.chartsGrid}>
@@ -233,7 +324,85 @@ const StationDetails = () => {
             </div>
 
             <div className={styles.tableSection}>
-                <h3>Reading History</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
+                    <h3 style={{ margin: 0 }}>Reading History</h3>
+
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                                type="date"
+                                className={styles.dateInput}
+                                value={dateFilter.start}
+                                onChange={(e) => setDateFilter({ ...dateFilter, start: e.target.value })}
+                                style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }}
+                            />
+                            <span style={{ color: '#666' }}>to</span>
+                            <input
+                                type="date"
+                                className={styles.dateInput}
+                                value={dateFilter.end}
+                                onChange={(e) => setDateFilter({ ...dateFilter, end: e.target.value })}
+                                style={{ padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }}
+                            />
+                        </div>
+
+                        <button
+                            onClick={handleFilter}
+                            style={{
+                                padding: '8px 12px',
+                                background: '#2563eb',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                            }}
+                        >
+                            <Filter size={16} /> Filter
+                        </button>
+
+                        {isFiltered && (
+                            <button
+                                onClick={handleReset}
+                                style={{
+                                    padding: '8px 12px',
+                                    background: '#f3f4f6',
+                                    color: '#374151',
+                                    border: '1px solid #ddd',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px'
+                                }}
+                            >
+                                <RefreshCw size={16} /> Reset
+                            </button>
+                        )}
+
+                        <button
+                            onClick={downloadCSV}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '8px 16px',
+                                borderRadius: '6px',
+                                border: '1px solid #10b981',
+                                background: '#ecfdf5',
+                                cursor: 'pointer',
+                                fontSize: '0.9rem',
+                                fontWeight: 500,
+                                color: '#047857'
+                            }}
+                        >
+                            <Download size={16} />
+                            Download
+                        </button>
+                    </div>
+                </div>
                 <div className={styles.tableContainer}>
                     <table className={styles.table}>
                         <thead>
