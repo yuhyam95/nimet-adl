@@ -85,30 +85,42 @@ const Stations = () => {
                         <thead>
                             <tr>
                                 <th>Station Name</th>
-                                <th>Station ID</th>
                                 <th>Coordinates</th>
                                 <th>Latest Reading</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {stations.map((station) => (
-                                <tr key={station.station_id}>
-                                    <td>
-                                        <Link to={`/stations/${station.station_id}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
-                                            {station.station_name}
-                                        </Link>
-                                    </td>
-                                    <td>{station.station_id}</td>
-                                    <td>{station.latitude}, {station.longitude}</td>
-                                    <td className={styles.lastUpdate}>
-                                        {new Date(station.last_reading_at).toLocaleString()}
-                                    </td>
-                                    <td>
-                                        <span className={styles.status}>Active</span>
-                                    </td>
-                                </tr>
-                            ))}
+                            {stations.map((station) => {
+                                const lastUpdate = new Date(station.last_reading_at);
+                                const diffMs = new Date().getTime() - lastUpdate.getTime();
+                                const isActive = diffMs < 3 * 60 * 60 * 1000; // 3 hours
+
+                                return (
+                                    <tr key={station.station_id}>
+                                        <td>
+                                            <Link to={`/stations/${station.station_id}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
+                                                {station.station_name}
+                                            </Link>
+                                        </td>
+                                        <td>{station.latitude}, {station.longitude}</td>
+                                        <td className={styles.lastUpdate}>
+                                            {lastUpdate.toLocaleString()}
+                                        </td>
+                                        <td>
+                                            <span
+                                                className={styles.status}
+                                                style={{
+                                                    backgroundColor: isActive ? '#d1fae5' : '#f3f4f6',
+                                                    color: isActive ? '#065f46' : '#374151'
+                                                }}
+                                            >
+                                                {isActive ? 'Active' : 'Inactive'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                             {stations.length === 0 && (
                                 <tr>
                                     <td colSpan={5}>No active stations found.</td>

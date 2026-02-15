@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./db/index.js');
 const apiService = require('./services/api.js');
+const { syncData } = require('./index.js');
 
 const app = express();
 const port = 3000; // You can change this port as needed
@@ -116,4 +117,14 @@ app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
     console.log(`- GET /api/weather`);
     console.log(`- GET /api/dataloggers`);
+
+    // Initial sync
+    console.log('Running initial data sync...');
+    syncData();
+
+    // Periodic sync every 15 minutes
+    setInterval(() => {
+        console.log('Running periodic data sync...');
+        syncData();
+    }, 15 * 60 * 1000);
 });

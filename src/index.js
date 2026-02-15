@@ -1,7 +1,7 @@
 const db = require('./db/index.js');
 const apiService = require('./services/api.js');
 
-async function main() {
+const syncData = async (shouldClosePool = false) => {
     try {
         // Determine the date range (e.g., today)
         const today = new Date().toISOString().split('T')[0];
@@ -22,7 +22,7 @@ async function main() {
 
         for (const logger of loggers) {
             try {
-                console.log(`\nProcessing Station: ${logger.stationName} (${logger._id})`);
+                // console.log(`\nProcessing Station: ${logger.stationName} (${logger._id})`);
 
                 const apiResponse = await apiService.fetchWeatherData(startDate, endDate, logger._id);
 
@@ -33,7 +33,7 @@ async function main() {
 
                 const { stationName, dataLoggerId, location, readings } = apiResponse.data;
 
-                console.log(`  > Found ${readings.length} readings.`);
+                // console.log(`  > Found ${readings.length} readings.`);
 
                 if (readings.length === 0) continue;
 
@@ -99,18 +99,25 @@ async function main() {
                         console.error(`  ! Failed to insert: ${dbError.message}`);
                     }
                 }
-                console.log(`  > ${insertedCount} records inserted.`);
+                // console.log(`  > ${insertedCount} records inserted.`);
 
             } catch (loggerError) {
                 console.error(`Error processing logger ${logger._id}: ${loggerError.message}`);
             }
         }
+        console.log('Data sync completed successfully.');
 
     } catch (error) {
-        console.error('Fatal error:', error);
+        console.error('Fatal error during sync:', error);
     } finally {
-        await db.pool.end();
+        if (shouldClosePool) {
+            await db.pool.end();
+        }
     }
+};
+
+if (require.main === module) {
+    syncData(true);
 }
 
-main();
+module.exports = { syncData };

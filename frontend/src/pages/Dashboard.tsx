@@ -63,13 +63,13 @@ const Dashboard = () => {
                         const validWinds = data.filter(s => s.wind_speed != null).map(s => Number(s.wind_speed));
                         const maxWind = validWinds.length ? Math.max(...validWinds) : 0;
 
-                        // Count active stations (e.g. updated in the last hour)
+                        // Count active stations (e.g. updated in the last 3 hours)
                         const now = new Date();
                         const activeCount = data.filter(s => {
                             if (!s.last_reading_at) return false;
                             const lastUpdate = new Date(s.last_reading_at);
                             const diffMs = now.getTime() - lastUpdate.getTime();
-                            return diffMs < 60 * 60 * 1000; // 1 hour
+                            return diffMs < 3 * 60 * 60 * 1000; // 3 hours
                         }).length;
 
                         setStats({
@@ -96,7 +96,7 @@ const Dashboard = () => {
 
     const getStatus = (lastReading: string) => {
         const diff = new Date().getTime() - new Date(lastReading).getTime();
-        const isOnline = diff < 60 * 60 * 1000; // 1 hour
+        const isOnline = diff < 3 * 60 * 60 * 1000; // 3 hours
         return isOnline ? 'Active' : 'Inactive';
     };
 
