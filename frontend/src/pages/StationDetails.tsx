@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 import {
     AreaChart,
     Area,
@@ -16,6 +17,7 @@ import {
 import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
+import { Skeleton } from '../components/ui/Skeleton';
 import styles from './StationDetails.module.css';
 
 // Fix for Leaflet default marker icon in Vite/React
@@ -44,6 +46,20 @@ interface WeatherReading {
     soil_temperature?: number;
     battery_voltage?: number;
     timestamp: string;
+    wind_gust?: number;
+    lightning_strike_count?: number;
+    lightning_strike_distance?: number;
+    vapor_pressure?: number;
+    humidity_sensor_temperature?: number;
+    x_orientation?: number;
+    y_orientation?: number;
+    atoms_gen2?: number;
+    north_wind_speed?: number;
+    east_wind_speed?: number;
+    soil_electrical_conductivity?: number;
+    soil_ph?: number;
+    panel_temperature?: number;
+    volumetric_water_content?: number;
 }
 
 interface Station {
@@ -60,95 +76,78 @@ interface Station {
 
 const StationDetails = () => {
     const { id } = useParams<{ id: string }>();
-    const [station, setStation] = useState<Station | null>(null);
-    const [readings, setReadings] = useState<WeatherReading[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [stats, setStats] = useState({
-        avgTemp: 0,
-        avgHumidity: 0,
-        maxWindSpeed: 0
-    });
-
     const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
     const [isFiltered, setIsFiltered] = useState(false);
-
-    // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
-    const fetchStationData = async (forceFilterString = '') => {
-        if (!id) return;
+    // 1. Fetch Station Metadata
+    const {
+        data: stations = [],
+        isLoading: isLoadingStations,
+        isError: isErrorStations,
+        error: errorStations,
+        refetch: refetchStations
+    } = useQuery({
+        queryKey: ['stations'],
+        queryFn: async () => {
+            const res = await axios.get('/api/dataloggers');
+            return res.data.success ? res.data.data : [];
+        },
+        staleTime: 5 * 60 * 1000,
+    });
 
-        try {
-            // Fetch station details (from all stations for now)
-            const stationsRes = await axios.get('/api/dataloggers');
-            if (stationsRes.data.success) {
-                const foundStation = stationsRes.data.data.find((s: Station) => s.station_id === id);
-                if (foundStation) {
-                    setStation(foundStation);
-                }
-            }
+    const station = stations.find((s: Station) => s.station_id === id) || null;
 
-            // Build query
-            let query = `/api/weather?stationId=${id}`;
-
-            if (forceFilterString && forceFilterString !== 'RESET') {
-                query += forceFilterString;
-                query += `&limit=10000`; // Get all for the range
-            } else {
-                query += `&limit=500`; // Default latest
-            }
-
-            const weatherRes = await axios.get(query);
-            if (weatherRes.data.success) {
-                const data = weatherRes.data.data;
-                const sortedForChart = [...data].reverse();
-                setReadings(sortedForChart);
-
-                // Compute stats
-                if (data.length > 0) {
-                    const totalTemp = data.reduce((acc: number, r: WeatherReading) => acc + Number(r.air_temperature), 0);
-                    const totalHum = data.reduce((acc: number, r: WeatherReading) => acc + Number(r.relative_humidity), 0);
-                    const maxWind = Math.max(...data.map((r: WeatherReading) => Number(r.wind_speed)));
-
-                    setStats({
-                        avgTemp: totalTemp / data.length,
-                        avgHumidity: totalHum / data.length,
-                        maxWindSpeed: maxWind
-                    });
-                } else {
-                    setStats({ avgTemp: 0, avgHumidity: 0, maxWindSpeed: 0 });
-                }
-            }
-        } catch (error) {
-            console.error("Error fetching station details", error);
-        } finally {
-            setLoading(false);
+    // 2. Fetch Weather Readings
+    // Construct query parameters
+    const getReadingsQuery = async () => {
+        let query = `/api/weather?stationId=${id}`;
+        if (isFiltered && dateFilter.start && dateFilter.end) {
+            const endDateTime = `${dateFilter.end}T23:59:59`;
+            query += `&startDate=${dateFilter.start}&endDate=${endDateTime}&limit=10000`;
+        } else {
+            query += `&limit=500`; // Default latest
         }
+        const res = await axios.get(query);
+        return res.data.success ? res.data.data : [];
     };
 
-    useEffect(() => {
-        // Initial load
-        fetchStationData();
+    const {
+        data: rawReadings = [],
+        isLoading: isLoadingReadings,
+        isError: isErrorReadings,
+        error: errorReadings,
+        refetch: refetchReadings
+    } = useQuery({
+        queryKey: ['readings', id, isFiltered, dateFilter],
+        queryFn: getReadingsQuery,
+        enabled: !!id,
+        refetchInterval: isFiltered ? false : 30000,
+    });
 
-        // Poll every 30 seconds ONLY if not filtered
-        const interval = setInterval(() => {
-            if (!isFiltered) {
-                fetchStationData();
-            }
-        }, 30000);
+    // Process readings (sort for chart vs table)
+    const readings = useMemo(() => [...rawReadings].reverse(), [rawReadings]); // Chart needs chronological
+    const readingsForTable = useMemo(() => [...readings].reverse(), [readings]); // Table needs reverse chronological
 
-        return () => clearInterval(interval);
-    }, [id, isFiltered]);
+    // Compute stats
+    const stats = useMemo(() => {
+        if (!rawReadings.length) return { avgTemp: 0, avgHumidity: 0, maxWindSpeed: 0 };
+        const totalTemp = rawReadings.reduce((acc: number, r: WeatherReading) => acc + Number(r.air_temperature), 0);
+        const totalHum = rawReadings.reduce((acc: number, r: WeatherReading) => acc + Number(r.relative_humidity), 0);
+        const maxWind = Math.max(...rawReadings.map((r: WeatherReading) => Number(r.wind_speed)));
+
+        return {
+            avgTemp: totalTemp / rawReadings.length,
+            avgHumidity: totalHum / rawReadings.length,
+            maxWindSpeed: maxWind
+        };
+    }, [rawReadings]);
 
     const handleFilter = () => {
         if (dateFilter.start && dateFilter.end) {
             setIsFiltered(true);
             setCurrentPage(1);
-            // Append end of day to end date
-            const endDateTime = `${dateFilter.end}T23:59:59`;
-            const queryString = `&startDate=${dateFilter.start}&endDate=${endDateTime}`;
-            fetchStationData(queryString);
         }
     };
 
@@ -156,11 +155,9 @@ const StationDetails = () => {
         setDateFilter({ start: '', end: '' });
         setIsFiltered(false);
         setCurrentPage(1);
-        fetchStationData('RESET');
     };
 
     // Pagination logic
-    const readingsForTable = [...readings].reverse();
     const totalPages = Math.ceil(readingsForTable.length / itemsPerPage);
     const paginatedReadings = readingsForTable.slice(
         (currentPage - 1) * itemsPerPage,
@@ -183,27 +180,53 @@ const StationDetails = () => {
             "Relative Humidity (%)",
             "Wind Speed (m/s)",
             "Wind Direction (°)",
+            "Wind Gust (m/s)",
             "Precipitation (mm)",
             "Solar Radiation (W)",
             "Atmospheric Pressure (hPa)",
             "Soil Temperature (°C)",
-            "Battery Voltage (V)"
+            "Soil Moisture (VWC)",
+            "Soil EC (dS/m)",
+            "Soil pH",
+            "Battery Voltage (V)",
+            "Panel Temp (°C)",
+            "Lightning Count",
+            "Lightning Dist (km)",
+            "Vapor Pressure (kPa)",
+            "Sensor Temp (°C)",
+            "X Orient",
+            "Y Orient",
+            "North Wind",
+            "East Wind"
         ];
 
         const csvContent = [
             headers.join(","),
             ...readingsForTable.map(r => [
-                `"${new Date(r.timestamp).toLocaleString()}"`, // Quote timestamp to handle commas
+                `"${new Date(r.timestamp).toLocaleString()}"`,
                 `"${r.station_name || station?.station_name || ''}"`,
                 r.air_temperature,
                 r.relative_humidity,
                 r.wind_speed,
                 r.wind_direction ?? '',
+                r.wind_gust ?? '',
                 r.precipitation ?? '',
                 r.solar_radiation ?? '',
                 r.atmospheric_pressure ?? '',
                 r.soil_temperature ?? '',
-                r.battery_voltage ?? ''
+                r.volumetric_water_content ?? '',
+                r.soil_electrical_conductivity ?? '',
+                r.soil_ph ?? '',
+                r.battery_voltage ?? '',
+                r.panel_temperature ?? '',
+                r.lightning_strike_count ?? '',
+                r.lightning_strike_distance ?? '',
+                r.vapor_pressure ?? '',
+                r.humidity_sensor_temperature ?? '',
+                r.x_orientation ?? '',
+                r.y_orientation ?? '',
+                r.north_wind_speed ?? '',
+                r.east_wind_speed ?? ''
             ].join(","))
         ].join("\n");
 
@@ -218,11 +241,99 @@ const StationDetails = () => {
         document.body.removeChild(link);
     };
 
-    if (loading) return <div>Loading station details...</div>;
+    if (isLoadingStations || (isLoadingReadings && !station)) { // Show loading if searching for station
+        return (
+            <div className={styles.container}>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                    <Skeleton width={100} height={20} />
+                </div>
+                <div className={styles.header}>
+                    <div>
+                        <Skeleton width={300} height={40} style={{ marginBottom: 8 }} />
+                        <div style={{ display: 'flex', gap: 16 }}>
+                            <Skeleton width={150} height={20} />
+                            <Skeleton width={200} height={20} />
+                        </div>
+                    </div>
+                </div>
+
+                <div className={styles.chartsGrid}>
+                    <div className={styles.chartCard} style={{ gridColumn: '1 / -1', height: 300 }}>
+                        <Skeleton width="100%" height="100%" />
+                    </div>
+                    <div className={styles.chartCard} style={{ height: 350 }}>
+                        <Skeleton width="100%" height="100%" />
+                    </div>
+                    <div className={styles.chartCard} style={{ height: 350 }}>
+                        <Skeleton width="100%" height="100%" />
+                    </div>
+                </div>
+
+                <div className={styles.tableSection}>
+                    <Skeleton width={200} height={32} style={{ marginBottom: 16 }} />
+                    <div className={styles.tableContainer}>
+                        <table className={styles.table}>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Temp</th>
+                                    <th>Hum</th>
+                                    <th>Wind</th>
+                                    <th>Gust</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[...Array(5)].map((_, i) => (
+                                    <tr key={i}>
+                                        <td><Skeleton width={150} height={20} /></td>
+                                        <td><Skeleton width={50} height={20} /></td>
+                                        <td><Skeleton width={50} height={20} /></td>
+                                        <td><Skeleton width={50} height={20} /></td>
+                                        <td><Skeleton width={50} height={20} /></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (isErrorStations || isErrorReadings) {
+        return (
+            <div className={styles.container} style={{ justifyContent: 'center', alignItems: 'center', minHeight: '50vh', textAlign: 'center' }}>
+                <div style={{ color: '#ef4444', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Error Loading Data</h3>
+                    <p>{(errorStations as Error)?.message || (errorReadings as Error)?.message || 'Failed to fetch data.'}</p>
+                </div>
+                <button
+                    onClick={() => {
+                        if (isErrorStations) refetchStations();
+                        if (isErrorReadings) refetchReadings();
+                    }}
+                    style={{
+                        padding: '10px 20px',
+                        backgroundColor: '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 500
+                    }}
+                >
+                    Retry
+                </button>
+            </div>
+        );
+    }
+
     if (!station) return <div>Station not found</div>;
 
     const lastUpdate = new Date(station.last_reading_at);
-    const isOnline = (new Date().getTime() - lastUpdate.getTime()) < 3 * 60 * 60 * 1000;
+    // Use last reading from readings array if available (more recent)
+    const latestReadingTime = rawReadings.length > 0 ? new Date(rawReadings[0].timestamp) : lastUpdate;
+    const isOnline = (new Date().getTime() - latestReadingTime.getTime()) < 3 * 60 * 60 * 1000;
 
     return (
         <div className={styles.container}>
@@ -448,6 +559,7 @@ const StationDetails = () => {
                             </button>
                         )}
 
+
                         <button
                             onClick={downloadCSV}
                             style={{
@@ -477,27 +589,33 @@ const StationDetails = () => {
                                 <th>Temp (°C)</th>
                                 <th>Hum (%)</th>
                                 <th>Wind (m/s)</th>
+                                <th>Gust (m/s)</th>
                                 <th>Dir (°)</th>
                                 <th>Rain (mm)</th>
                                 <th>Solar (W)</th>
                                 <th>Press (hPa)</th>
                                 <th>Soil (°C)</th>
+                                <th>VWC</th>
                                 <th>Batt (V)</th>
+                                <th>Lightning</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {paginatedReadings.map((reading) => (
+                            {paginatedReadings.map((reading: WeatherReading) => (
                                 <tr key={reading.id || reading.timestamp}>
                                     <td>{new Date(reading.timestamp).toLocaleString()}</td>
                                     <td>{reading.air_temperature}</td>
                                     <td>{reading.relative_humidity}</td>
                                     <td>{reading.wind_speed}</td>
+                                    <td>{reading.wind_gust ?? '-'}</td>
                                     <td>{reading.wind_direction ?? '-'}</td>
                                     <td>{reading.precipitation ?? '-'}</td>
                                     <td>{reading.solar_radiation ?? '-'}</td>
                                     <td>{reading.atmospheric_pressure ?? '-'}</td>
                                     <td>{reading.soil_temperature ?? '-'}</td>
+                                    <td>{reading.volumetric_water_content ? Number(reading.volumetric_water_content).toFixed(2) : '-'}</td>
                                     <td>{reading.battery_voltage ?? '-'}</td>
+                                    <td>{reading.lightning_strike_count ?? '-'}</td>
                                 </tr>
                             ))}
                         </tbody>

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
     Thermometer,
@@ -13,6 +14,7 @@ import {
     CloudRain,
     Sun
 } from 'lucide-react';
+import { Skeleton } from '../components/ui/Skeleton';
 import styles from './Dashboard.module.css';
 
 interface Station {
@@ -33,77 +35,122 @@ interface Station {
 }
 
 const Dashboard = () => {
-    const [stations, setStations] = useState<Station[]>([]);
-    const [stats, setStats] = useState({
-        totalStations: 0,
-        activeStations: 0,
-        avgTemp: 0,
-        avgHumidity: 0,
-        maxWindSpeed: 0
+    const { data: stations = [], isLoading, isError, error, refetch } = useQuery({
+        queryKey: ['stations'],
+        queryFn: async () => {
+            const res = await axios.get('/api/dataloggers');
+            return res.data.success ? res.data.data : [];
+        },
+        refetchInterval: 30000, // Poll every 30 seconds
     });
-    const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        const fetchStations = async () => {
-            try {
-                const res = await axios.get('/api/dataloggers');
+    const stats = useMemo(() => {
+        if (!stations.length) {
+            return {
+                totalStations: 0,
+                activeStations: 0,
+                avgTemp: 0,
+                avgHumidity: 0,
+                maxWindSpeed: 0
+            };
+        }
 
-                if (res.data.success) {
-                    const data: Station[] = res.data.data;
-                    setStations(data);
+        const validTemps = stations.filter((s: Station) => s.air_temperature != null).map((s: Station) => Number(s.air_temperature));
+        const avgTemp = validTemps.length ? validTemps.reduce((a: number, b: number) => a + b, 0) / validTemps.length : 0;
 
-                    // Compute stats from the latest reading of each station
-                    if (data.length > 0) {
-                        const validTemps = data.filter(s => s.air_temperature != null).map(s => Number(s.air_temperature));
-                        const avgTemp = validTemps.length ? validTemps.reduce((a, b) => a + b, 0) / validTemps.length : 0;
+        const validHums = stations.filter((s: Station) => s.relative_humidity != null).map((s: Station) => Number(s.relative_humidity));
+        const avgHum = validHums.length ? validHums.reduce((a: number, b: number) => a + b, 0) / validHums.length : 0;
 
-                        const validHums = data.filter(s => s.relative_humidity != null).map(s => Number(s.relative_humidity));
-                        const avgHum = validHums.length ? validHums.reduce((a, b) => a + b, 0) / validHums.length : 0;
+        const validWinds = stations.filter((s: Station) => s.wind_speed != null).map((s: Station) => Number(s.wind_speed));
+        const maxWind = validWinds.length ? Math.max(...validWinds) : 0;
 
-                        const validWinds = data.filter(s => s.wind_speed != null).map(s => Number(s.wind_speed));
-                        const maxWind = validWinds.length ? Math.max(...validWinds) : 0;
+        // Count active stations (e.g. updated in the last 3 hours)
+        const now = new Date();
+        const activeCount = stations.filter((s: Station) => {
+            if (!s.last_reading_at) return false;
+            const lastUpdate = new Date(s.last_reading_at);
+            const diffMs = now.getTime() - lastUpdate.getTime();
+            return diffMs < 3 * 60 * 60 * 1000; // 3 hours
+        }).length;
 
-                        // Count active stations (e.g. updated in the last 3 hours)
-                        const now = new Date();
-                        const activeCount = data.filter(s => {
-                            if (!s.last_reading_at) return false;
-                            const lastUpdate = new Date(s.last_reading_at);
-                            const diffMs = now.getTime() - lastUpdate.getTime();
-                            return diffMs < 3 * 60 * 60 * 1000; // 3 hours
-                        }).length;
-
-                        setStats({
-                            totalStations: data.length,
-                            activeStations: activeCount,
-                            avgTemp,
-                            avgHumidity: avgHum,
-                            maxWindSpeed: maxWind
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error("Error fetching dashboard data", error);
-            } finally {
-                setLoading(false);
-            }
+        return {
+            totalStations: stations.length,
+            activeStations: activeCount,
+            avgTemp,
+            avgHumidity: avgHum,
+            maxWindSpeed: maxWind
         };
+    }, [stations]);
 
-        fetchStations();
-        // Poll every 30 seconds
-        const interval = setInterval(fetchStations, 30000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const getStatus = (lastReading: string) => {
+    const getStatus = (lastReading?: string) => {
+        if (!lastReading) return 'Inactive';
         const diff = new Date().getTime() - new Date(lastReading).getTime();
         const isOnline = diff < 3 * 60 * 60 * 1000; // 3 hours
         return isOnline ? 'Active' : 'Inactive';
     };
 
-    if (loading) {
+    if (isLoading) {
         return (
-            <div className="flex items-center justify-center h-full">
-                <div style={{ padding: '20px', textAlign: 'center' }}>Loading dashboard...</div>
+            <div className={styles.dashboard}>
+                <div className={styles.statsGrid}>
+                    {[...Array(4)].map((_, i) => (
+                        <div key={i} className={styles.statCard}>
+                            <Skeleton width={120} height={20} style={{ marginBottom: 8 }} />
+                            <Skeleton width={60} height={32} />
+                        </div>
+                    ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <Skeleton width={200} height={24} />
+                    <div className={styles.statsGrid}>
+                        {[...Array(6)].map((_, i) => (
+                            <div key={i} className={styles.stationCard} style={{ height: '220px', padding: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                                    <Skeleton width={150} height={24} />
+                                    <Skeleton width={60} height={24} style={{ borderRadius: 99 }} />
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '16px' }}>
+                                    {[...Array(6)].map((_, j) => (
+                                        <div key={j}>
+                                            <Skeleton width="100%" height={16} style={{ marginBottom: 4 }} />
+                                            <Skeleton width="80%" height={20} />
+                                        </div>
+                                    ))}
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'auto' }}>
+                                    <Skeleton width={100} height={16} />
+                                    <Skeleton width={60} height={16} />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (isError) {
+        return (
+            <div className={styles.dashboard} style={{ justifyContent: 'center', alignItems: 'center', minHeight: '50vh', textAlign: 'center' }}>
+                <div style={{ color: '#ef4444', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Error Loading Dashboard</h3>
+                    <p>{(error as Error)?.message || 'Failed to fetch station data. Please try again.'}</p>
+                </div>
+                <button
+                    onClick={() => refetch()}
+                    style={{
+                        padding: '10px 20px',
+                        backgroundColor: '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 500
+                    }}
+                >
+                    Retry
+                </button>
             </div>
         );
     }
@@ -133,7 +180,7 @@ const Dashboard = () => {
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#111827' }}>Station Status & Readings</h3>
 
                 <div className={styles.statsGrid}>
-                    {stations.map((station) => {
+                    {stations.map((station: Station) => {
                         const status = getStatus(station.last_reading_at);
                         const isActive = status === 'Active';
 
@@ -202,7 +249,7 @@ const Dashboard = () => {
                                 <div className={styles.cardFooter}>
                                     <div className={styles.lastUpdated}>
                                         <Clock size={12} />
-                                        {new Date(station.last_reading_at).toLocaleString()}
+                                        {station.last_reading_at ? new Date(station.last_reading_at).toLocaleString() : 'Never'}
                                     </div>
                                     <div className={styles.viewDetails}>
                                         Details <ArrowRight size={14} />

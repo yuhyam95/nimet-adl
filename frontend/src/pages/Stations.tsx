@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 import { Map as MapIcon, Table as TableIcon } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
+import { Skeleton } from '../components/ui/Skeleton';
 import styles from './Stations.module.css';
 
 // Fix for Leaflet default marker icon in Vite/React
@@ -29,26 +31,15 @@ interface Station {
 }
 
 const Stations = () => {
-    const [stations, setStations] = useState<Station[]>([]);
-    const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
 
-    useEffect(() => {
-        const fetchStations = async () => {
-            try {
-                const response = await axios.get('/api/dataloggers');
-                if (response.data.success) {
-                    setStations(response.data.data);
-                }
-            } catch (error) {
-                console.error("Error fetching stations", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchStations();
-    }, []);
+    const { data: stations = [], isLoading, isError, error, refetch } = useQuery({
+        queryKey: ['stations'],
+        queryFn: async () => {
+            const res = await axios.get('/api/dataloggers');
+            return res.data.success ? res.data.data : [];
+        },
+    });
 
     // Calculate center based on stations, default to Nigeria roughly
     const defaultCenter: [number, number] = [9.0820, 8.6753];
@@ -56,7 +47,70 @@ const Stations = () => {
         ? [stations[0].latitude, stations[0].longitude]
         : defaultCenter;
 
-    if (loading) return <div>Loading stations...</div>;
+    if (isLoading) {
+        return (
+            <div className={styles.container}>
+                <div className={styles.header}>
+                    <h2> Data Loggers</h2>
+                </div>
+                {viewMode === 'table' ? (
+                    <div className={styles.tableContainer}>
+                        <table className={styles.table}>
+                            <thead>
+                                <tr>
+                                    <th>Station Name</th>
+                                    <th>Coordinates</th>
+                                    <th>Organization</th>
+                                    <th>Latest Reading</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[...Array(8)].map((_, i) => (
+                                    <tr key={i}>
+                                        <td><Skeleton width={150} height={20} /></td>
+                                        <td><Skeleton width={120} height={20} /></td>
+                                        <td><Skeleton width={100} height={20} /></td>
+                                        <td><Skeleton width={140} height={20} /></td>
+                                        <td><Skeleton width={80} height={24} style={{ borderRadius: 99 }} /></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className={styles.mapContainer}>
+                        <Skeleton width="100%" height="100%" />
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    if (isError) {
+        return (
+            <div className={styles.container} style={{ justifyContent: 'center', alignItems: 'center', height: '50vh', textAlign: 'center' }}>
+                <div style={{ color: '#ef4444', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Error Loading Stations</h3>
+                    <p>{(error as Error)?.message || 'Failed to fetch station data.'}</p>
+                </div>
+                <button
+                    onClick={() => refetch()}
+                    style={{
+                        padding: '10px 20px',
+                        backgroundColor: '#2563eb',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 500
+                    }}
+                >
+                    Retry
+                </button>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.container}>
@@ -93,10 +147,12 @@ const Stations = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {stations.map((station) => {
-                                const lastUpdate = new Date(station.last_reading_at);
-                                const diffMs = new Date().getTime() - lastUpdate.getTime();
-                                const isActive = diffMs < 3 * 60 * 60 * 1000; // 3 hours
+                            {stations.map((station: Station) => {
+                                const lastUpdate = station.last_reading_at ? new Date(station.last_reading_at) : null;
+                                const isActive = lastUpdate
+                                    ? (new Date().getTime() - lastUpdate.getTime()) < 3 * 60 * 60 * 1000
+                                    : false;
+                                const isOnline = isActive; // Assuming logic is same
 
                                 return (
                                     <tr key={station.station_id}>
@@ -108,17 +164,17 @@ const Stations = () => {
                                         <td>{station.latitude}, {station.longitude}</td>
                                         <td>{station.organization || '-'}</td>
                                         <td className={styles.lastUpdate}>
-                                            {lastUpdate.toLocaleString()}
+                                            {lastUpdate ? lastUpdate.toLocaleString() : 'Never'}
                                         </td>
                                         <td>
                                             <span
                                                 className={styles.status}
                                                 style={{
-                                                    backgroundColor: isActive ? '#d1fae5' : '#f3f4f6',
-                                                    color: isActive ? '#065f46' : '#374151'
+                                                    backgroundColor: isOnline ? '#d1fae5' : '#f3f4f6',
+                                                    color: isOnline ? '#065f46' : '#374151'
                                                 }}
                                             >
-                                                {isActive ? 'Active' : 'Inactive'}
+                                                {isOnline ? 'Active' : 'Inactive'}
                                             </span>
                                         </td>
                                     </tr>
@@ -143,7 +199,7 @@ const Stations = () => {
                             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         />
-                        {stations.map((station) => (
+                        {stations.map((station: Station) => (
                             <Marker
                                 key={station.station_id}
                                 position={[station.latitude, station.longitude]}
@@ -153,7 +209,7 @@ const Stations = () => {
                                         {station.station_name}
                                     </Link><br />
                                     ID: {station.station_id}<br />
-                                    Last Update: {new Date(station.last_reading_at).toLocaleString()}
+                                    Last Update: {station.last_reading_at ? new Date(station.last_reading_at).toLocaleString() : 'Never'}
                                 </Popup>
                             </Marker>
                         ))}
