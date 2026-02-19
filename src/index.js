@@ -91,16 +91,25 @@ const syncData = async (shouldClosePool = false) => {
 
                 // Improved Table Schema (weather_readings) - handled elsewhere or assumed existing
                 const insertQuery = `
-      INSERT INTO weather_readings (
-        station_name, station_id, latitude, longitude, timestamp,
-        air_temperature, relative_humidity, wind_speed, wind_direction,
-        precipitation, solar_radiation, atmospheric_pressure,
-        soil_temperature, battery_voltage
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-      ON CONFLICT (station_id, timestamp) DO NOTHING
-      RETURNING id;
-    `;
+                    INSERT INTO weather_readings (
+                        station_name, station_id, latitude, longitude, timestamp,
+                        air_temperature, relative_humidity, wind_speed, wind_direction,
+                        precipitation, solar_radiation, atmospheric_pressure,
+                        soil_temperature, battery_voltage,
+                        wind_gust, lightning_strike_count, lightning_strike_distance,
+                        vapor_pressure, humidity_sensor_temperature,
+                        x_orientation, y_orientation, atoms_gen2,
+                        north_wind_speed, east_wind_speed,
+                        soil_electrical_conductivity, soil_ph,
+                        panel_temperature, volumetric_water_content
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+                    )
+                    ON CONFLICT (station_id, timestamp) DO NOTHING
+                    RETURNING id;
+                    `;
 
                 let insertedCount = 0;
 
@@ -113,14 +122,28 @@ const syncData = async (shouldClosePool = false) => {
                         location.longitude,
                         record.timestamp,
                         record.airTemperature,
-                        record.relativeHumidity,
+                        record.relativeHumidity != null ? Math.round(record.relativeHumidity * 100) : null,
                         record.windSpeed,
                         record.windDirection,
                         record.precipitation,
                         record.solarRadiation,
                         record.atmosphericPressure,
                         record.soilTemperature,
-                        record.batteryVoltage
+                        record.batteryVoltage,
+                        record.windGust,
+                        record.lightningStrikeCount,
+                        record.lightningStrikeDistance,
+                        record.vaporPressure,
+                        record.humidityOfSensorTemperature, // Note key mapping
+                        record.xOrientation,
+                        record.yOrientation,
+                        record.atomsGen2,
+                        record.northWindSpeed,
+                        record.eastWindSpeed,
+                        record.soilElectricalConductivity,
+                        record.soilPH,
+                        record.panelTemperature,
+                        record.volumetricWaterContent
                     ];
 
                     try {

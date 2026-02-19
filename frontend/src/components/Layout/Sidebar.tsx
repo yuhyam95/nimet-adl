@@ -3,18 +3,27 @@ import {
     LayoutDashboard,
     LogOut,
     MapPin,
-    CloudRain
+    Settings,
+    Users,
+    User,
+    Radio,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import styles from './Sidebar.module.css';
 
 export const Sidebar = () => {
 
+    const isAdmin = true; // TODO: Replace with actual auth logic
+
     // Simplified menu for Weather Dashboard
     const menuItems = [
         { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
         { icon: <MapPin size={20} />, label: 'Stations', path: '/stations' },
-        { icon: <CloudRain size={20} />, label: 'Weather Data', path: '/weather' },
+        { icon: <Radio size={20} />, label: 'Dispatch Channels', path: '/dispatch' },
+        { icon: <Settings size={20} />, label: 'Configuration', path: '/configuration' },
+        ...(isAdmin ? [{ icon: <Users size={20} />, label: 'User Management', path: '/users' }] : []),
+        { icon: <User size={20} />, label: 'Profile', path: '/profile' },
+        // { icon: <CloudRain size={20} />, label: 'Weather Data', path: '/weather' },
     ];
 
     const handleLogout = () => {
