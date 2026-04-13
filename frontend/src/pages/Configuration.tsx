@@ -48,10 +48,11 @@ const Configuration = () => {
 
     const handleEdit = (provider: any) => {
         setEditing(provider.name);
+        const currentUsername = provider.username || provider.apiKey || '';
         setFormData({
             baseUrl: provider.baseUrl,
             email: provider.email || '',
-            apiKey: provider.apiKey?.includes('**') ? '' : (provider.apiKey || ''),
+            apiKey: currentUsername.includes('**') ? '' : currentUsername,
             password: '',
             apiSecret: ''
         });
@@ -183,19 +184,19 @@ const Configuration = () => {
                                             ) : (
                                                 <>
                                                     <div className={styles.formGroup}>
-                                                        <label>API Key</label>
+                                                        <label>Username</label>
                                                         <input 
                                                             type="text" 
-                                                            placeholder="Enter API Key"
+                                                            placeholder="Enter TAHMO Username"
                                                             value={formData.apiKey} 
                                                             onChange={e => setFormData({...formData, apiKey: e.target.value})}
                                                         />
                                                     </div>
                                                     <div className={styles.formGroup}>
-                                                        <label>API Secret</label>
+                                                        <label>Password</label>
                                                         <input 
                                                             type="password" 
-                                                            placeholder="Enter API Secret"
+                                                            placeholder="Enter TAHMO Password"
                                                             value={formData.apiSecret} 
                                                             onChange={e => setFormData({...formData, apiSecret: e.target.value})}
                                                         />
@@ -217,18 +218,10 @@ const Configuration = () => {
                                                 <span className={styles.label}>Base URL</span>
                                                 <span className={styles.value}>{provider.baseUrl || 'None'}</span>
                                             </div>
-                                            {provider.email && (
-                                                <div className={styles.infoRow}>
-                                                    <span className={styles.label}>Account</span>
-                                                    <span className={styles.value}>{provider.email}</span>
-                                                </div>
-                                            )}
-                                            {provider.apiKey && (
-                                                <div className={styles.infoRow}>
-                                                    <span className={styles.label}>API Key</span>
-                                                    <span className={styles.value}>{provider.apiKey}</span>
-                                                </div>
-                                            )}
+                                            <div className={styles.infoRow}>
+                                                <span className={styles.label}>{provider.name === 'TAHMO' ? 'Username' : 'Account'}</span>
+                                                <span className={styles.value}>{provider.email || provider.username || provider.apiKey}</span>
+                                            </div>
                                         </>
                                     )}
                                 </div>

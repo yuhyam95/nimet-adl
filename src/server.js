@@ -151,8 +151,8 @@ app.get('/api/config', (req, res) => {
                 {
                     name: 'TAHMO',
                     baseUrl: config.tahmo.baseUrl,
-                    apiKey: config.tahmo.apiKey ? '********' + config.tahmo.apiKey.slice(-4) : null,
-                    apiSecret: config.tahmo.apiSecret ? '********' : null,
+                    username: config.tahmo.apiKey ? '********' + config.tahmo.apiKey.slice(-4) : null,
+                    password: config.tahmo.apiSecret ? '********' : null,
                     isActive: !!config.tahmo.apiKey && !!config.tahmo.apiSecret
                 }
             ]
