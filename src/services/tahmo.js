@@ -13,18 +13,20 @@ module.exports = {
             // TAHMO might return stations differently
             return {
                 success: true,
-                data: response.data.map(station => ({
-                    _id: station.id,
-                    stationName: station.name || station.id,
+                data: response.data.data.map(station => ({
+                    _id: station.code,
+                    stationName: station.location.name,
                     location: {
                         type: 'Point',
-                        coordinates: [station.longitude, station.latitude],
-                        country: station.country,
+                        coordinates: [station.location.longitude, station.location.latitude],
+                        country: station.location.countrycode || 'NG',
+                        city: station.location.city,
+                        state: station.location.state
                     },
                     dataLoggerModel: 'TAHMO',
-                    organization: { name: 'TAHMO' },
-                    lastReading: station.lastReading,
-                    isActive: station.status === 'ACTIVE',
+                    organization: { name: station.location.type || 'TAHMO' },
+                    lastReading: null, // Basic station metadata doesn't include last reading
+                    isActive: station.status === 1,
                     provider: 'TAHMO'
                 }))
             };
