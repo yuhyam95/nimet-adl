@@ -4,6 +4,7 @@ import MainLayout from './components/Layout/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Stations from './pages/Stations';
 import StationDetails from './pages/StationDetails';
+import Configuration from './pages/Configuration';
 import './styles/global.css';
 
 const queryClient = new QueryClient({
@@ -25,7 +26,7 @@ function App() {
             <Route path="/stations" element={<Stations />} />
             <Route path="/stations/:id" element={<StationDetails />} />
             <Route path="/dispatch" element={<div>Dispatch Channels</div>} />
-            <Route path="/configuration" element={<div>Configuration</div>} />
+            <Route path="/configuration" element={<Configuration />} />
             <Route path="/users" element={<div>User Management</div>} />
             <Route path="/profile" element={<div>Profile</div>} />
             <Route path="/weather" element={<div>Weather Data Table coming soon...</div>} />

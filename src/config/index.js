@@ -16,5 +16,10 @@ module.exports = {
     loginEndpoint: process.env.API_LOGIN_ENDPOINT,
     loggersEndpoint: process.env.API_LOGGERS_ENDPOINT,
     weatherEndpoint: process.env.API_WEATHER_ENDPOINT
+  },
+  tahmo: {
+    baseUrl: process.env.TAHMO_API_BASE_URL || 'https://tahmoapi.mybluemix.net/v1',
+    apiKey: process.env.TAHMO_API_KEY,
+    apiSecret: process.env.TAHMO_API_SECRET
   }
 };

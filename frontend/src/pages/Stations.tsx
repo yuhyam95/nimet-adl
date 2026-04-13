@@ -28,6 +28,7 @@ interface Station {
     longitude: number;
     organization?: string;
     last_reading_at: string;
+    is_active: boolean;
 }
 
 const Stations = () => {
@@ -149,10 +150,8 @@ const Stations = () => {
                         <tbody>
                             {stations.map((station: Station) => {
                                 const lastUpdate = station.last_reading_at ? new Date(station.last_reading_at) : null;
-                                const isActive = lastUpdate
-                                    ? (new Date().getTime() - lastUpdate.getTime()) < 3 * 60 * 60 * 1000
-                                    : false;
-                                const isOnline = isActive; // Assuming logic is same
+                                const isActive = station.is_active;
+                                const isOnline = isActive;
 
                                 return (
                                     <tr key={station.station_id}>

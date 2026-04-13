@@ -1,0 +1,274 @@
+.container {
+    padding: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+    color: #1f2937;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 40px;
+}
+
+.titleSection {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.titleSection h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+    color: #111827;
+}
+
+.titleSection p {
+    color: #6b7280;
+    margin: 4px 0 0 0;
+}
+
+.icon {
+    color: #2563eb;
+    background: #eff6ff;
+    padding: 12px;
+    border-radius: 12px;
+}
+
+.refreshBtn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    color: #374151;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.refreshBtn:hover {
+    background: #f9fafb;
+    border-color: #d1d5db;
+}
+
+.section {
+    margin-bottom: 48px;
+}
+
+.sectionHeader {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    color: #4b5563;
+}
+
+.sectionHeader h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+    gap: 24px;
+}
+
+.card {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e5e7eb;
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.cardHeader {
+    padding: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.providerLogo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.providerLogo h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.statusBadge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.statusActive {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.statusInactive {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.cardBody {
+    padding: 24px;
+}
+
+.infoRow {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.infoRow:last-child {
+    border-bottom: none;
+}
+
+.label {
+    color: #6b7280;
+    font-size: 0.875rem;
+}
+
+.value {
+    color: #111827;
+    font-weight: 500;
+    font-size: 0.875rem;
+}
+
+.cardFooter {
+    padding: 16px 24px;
+    background: #f9fafb;
+    border-top: 1px solid #f3f4f6;
+}
+
+.helperText {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin: 0;
+}
+
+.active {
+    border-top: 4px solid #10b981;
+}
+
+.inactive {
+    border-top: 4px solid #ef4444;
+}
+
+.editBtn {
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 6px;
+    color: #4b5563;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.editBtn:hover {
+    background: #e5e7eb;
+    color: #111827;
+}
+
+.editForm {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.formGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.formGroup label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4b5563;
+}
+
+.formGroup input {
+    padding: 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.formGroup input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.formActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.saveBtn, .cancelBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.saveBtn {
+    background: #10b981;
+    color: white;
+    border: none;
+}
+
+.saveBtn:hover:not(:disabled) {
+    background: #059669;
+}
+
+.saveBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.cancelBtn {
+    background: white;
+    border: 1px solid #d1d5db;
+    color: #4b5563;
+}
+
+.cancelBtn:hover {
+    background: #f9fafb;
+}

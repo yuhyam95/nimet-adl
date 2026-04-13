@@ -32,6 +32,8 @@ interface Station {
     soil_temperature: number;
     battery_voltage: number;
     last_reading_at: string;
+    is_active: boolean;
+    provider: string;
 }
 
 const Dashboard = () => {
@@ -64,14 +66,8 @@ const Dashboard = () => {
         const validWinds = stations.filter((s: Station) => s.wind_speed != null).map((s: Station) => Number(s.wind_speed));
         const maxWind = validWinds.length ? Math.max(...validWinds) : 0;
 
-        // Count active stations (e.g. updated in the last 3 hours)
-        const now = new Date();
-        const activeCount = stations.filter((s: Station) => {
-            if (!s.last_reading_at) return false;
-            const lastUpdate = new Date(s.last_reading_at);
-            const diffMs = now.getTime() - lastUpdate.getTime();
-            return diffMs < 3 * 60 * 60 * 1000; // 3 hours
-        }).length;
+        // Count active stations based on is_active flag
+        const activeCount = stations.filter((s: Station) => s.is_active).length;
 
         return {
             totalStations: stations.length,
@@ -81,13 +77,6 @@ const Dashboard = () => {
             maxWindSpeed: maxWind
         };
     }, [stations]);
-
-    const getStatus = (lastReading?: string) => {
-        if (!lastReading) return 'Inactive';
-        const diff = new Date().getTime() - new Date(lastReading).getTime();
-        const isOnline = diff < 3 * 60 * 60 * 1000; // 3 hours
-        return isOnline ? 'Active' : 'Inactive';
-    };
 
     if (isLoading) {
         return (
@@ -181,8 +170,8 @@ const Dashboard = () => {
 
                 <div className={styles.statsGrid}>
                     {stations.map((station: Station) => {
-                        const status = getStatus(station.last_reading_at);
-                        const isActive = status === 'Active';
+                        const isActive = station.is_active;
+                        const status = isActive ? 'Active' : 'Inactive';
 
                         return (
                             <Link
@@ -193,9 +182,14 @@ const Dashboard = () => {
                                 <div className={styles.cardHeader}>
                                     <div className={styles.cardTitle}>
                                         <MapPin size={18} />
-                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '150px' }}>
-                                            {station.station_name}
-                                        </span>
+                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '150px' }}>
+                                                {station.station_name}
+                                            </span>
+                                            <span style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 500 }}>
+                                                {station.provider || 'CLIMDES'}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div className={`${styles.statusBadge} ${isActive ? styles.statusActive : styles.statusInactive}`}>
                                         <Activity size={12} />

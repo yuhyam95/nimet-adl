@@ -72,6 +72,8 @@ interface Station {
     organization?: string;
     country?: string;
     last_reading_at: string;
+    is_active: boolean;
+    provider: string;
 }
 
 const StationDetails = () => {
@@ -331,9 +333,7 @@ const StationDetails = () => {
     if (!station) return <div>Station not found</div>;
 
     const lastUpdate = new Date(station.last_reading_at);
-    // Use last reading from readings array if available (more recent)
-    const latestReadingTime = rawReadings.length > 0 ? new Date(rawReadings[0].timestamp) : lastUpdate;
-    const isOnline = (new Date().getTime() - latestReadingTime.getTime()) < 3 * 60 * 60 * 1000;
+    const isOnline = station.is_active;
 
     return (
         <div className={styles.container}>
@@ -344,7 +344,12 @@ const StationDetails = () => {
 
             <div className={styles.header}>
                 <div className={styles.stationInfo}>
-                    <h1>{station.station_name}</h1>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
+                        <h1>{station.station_name}</h1>
+                        <span style={{ fontSize: '0.9rem', color: '#6b7280', background: '#f3f4f6', padding: '2px 8px', borderRadius: '4px' }}>
+                            {station.provider || 'CLIMDES'}
+                        </span>
+                    </div>
                     <div className={styles.meta}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <MapPin size={16} />

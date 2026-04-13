@@ -1,81 +1,74 @@
 const db = require('./db/index.js');
-const apiService = require('./services/api.js');
+const climdesService = require('./services/climdes.js');
+const tahmoService = require('./services/tahmo.js');
 require('dotenv').config();
 
 const fullSync = async () => {
     const startDate = '2025-07-07';
-    // Use yesterday as end date to ensure full days, or today. 
-    // Let's use today's date.
     const endDate = new Date().toISOString().split('T')[0];
+
+    const providers = [
+        { name: 'CLIMDES', service: climdesService },
+        { name: 'TAHMO', service: tahmoService }
+    ];
 
     console.log(`Starting FULL data sync from ${startDate} to ${endDate}...`);
 
     try {
-        console.log('Fetching active data loggers...');
-        const loggersResponse = await apiService.fetchDataLoggers();
-
-        if (!loggersResponse || !loggersResponse.data) {
-            throw new Error('Failed to fetch data loggers list');
-        }
-
-        const loggers = loggersResponse.data;
-        console.log(`Found ${loggers.length} total data loggers.`);
-
-        for (const logger of loggers) {
-            console.log(`--------------------------------------------------`);
-            console.log(`Processing Station: ${logger.stationName} (${logger._id})`);
-
-            if (!logger.isActive) {
-                console.log(`  -> Station is Inactive, but syncing historical data...`);
-            }
-
-            // We will fetch in 30-day chunks to avoid timeouts or massive payloads
-            let currentStart = new Date(startDate);
-            const finalEnd = new Date(endDate);
-
-            while (currentStart <= finalEnd) {
-                let currentEnd = new Date(currentStart);
-                currentEnd.setDate(currentEnd.getDate() + 30);
-
-                if (currentEnd > finalEnd) {
-                    currentEnd = finalEnd;
+        for (const provider of providers) {
+            console.log(`--- Syncing Provider: ${provider.name} ---`);
+            try {
+                const loggersResponse = await provider.service.fetchDataLoggers();
+                if (!loggersResponse || !loggersResponse.data) {
+                    console.error(`Failed to fetch loggers for ${provider.name}`);
+                    continue;
                 }
 
-                const startStr = currentStart.toISOString().split('T')[0];
-                const endStr = currentEnd.toISOString().split('T')[0];
+                const loggers = loggersResponse.data;
+                console.log(`Found ${loggers.length} total data loggers for ${provider.name}.`);
 
-                console.log(`  -> Fetching batch: ${startStr} to ${endStr}`);
+                for (const logger of loggers) {
+                    console.log(`Processing Station: ${logger.stationName} (${logger._id})`);
 
-                try {
-                    const apiResponse = await apiService.fetchWeatherData(startStr, endStr, logger._id);
+                    let currentStart = new Date(startDate);
+                    const finalEnd = new Date(endDate);
 
-                    if (apiResponse && apiResponse.success && apiResponse.data) {
-                        const { readings } = apiResponse.data;
-                        if (readings.length > 0) {
-                            await insertReadings(logger.stationName, logger._id, apiResponse.data.location, readings);
-                            console.log(`     -> Synced ${readings.length} readings.`);
-                        } else {
-                            console.log(`     -> No readings found in this batch.`);
+                    while (currentStart <= finalEnd) {
+                        let currentEnd = new Date(currentStart);
+                        currentEnd.setDate(currentEnd.getDate() + 30);
+                        if (currentEnd > finalEnd) currentEnd = finalEnd;
+
+                        const startStr = currentStart.toISOString().split('T')[0];
+                        const endStr = currentEnd.toISOString().split('T')[0];
+
+                        console.log(`  -> Fetching batch: ${startStr} to ${endStr}`);
+
+                        try {
+                            const apiResponse = await provider.service.fetchWeatherData(startStr, endStr, logger._id);
+                            if (apiResponse && apiResponse.success && apiResponse.data) {
+                                const { readings } = apiResponse.data;
+                                if (readings && readings.length > 0) {
+                                    await insertReadings(logger.stationName, logger._id, apiResponse.data.location || logger.location, readings);
+                                    console.log(`     -> Synced ${readings.length} readings.`);
+                                } else {
+                                    console.log(`     -> No readings found in this batch.`);
+                                }
+                            } else {
+                                console.error(`     -> API Error or no data for batch.`);
+                            }
+                        } catch (batchError) {
+                            console.error(`     -> Error processing batch ${startStr} to ${endStr}: ${batchError.message}`);
                         }
-                    } else {
-                        console.error(`     -> API Error or no data for batch.`);
+
+                        currentStart = new Date(currentEnd);
+                        currentStart.setDate(currentStart.getDate() + 1);
+                        await new Promise(resolve => setTimeout(resolve, 500));
                     }
-                } catch (batchError) {
-                    console.error(`     -> Error processing batch ${startStr} to ${endStr}: ${batchError.message}`);
                 }
-
-                // Move to next batch (next day after currentEnd)
-                currentStart = new Date(currentEnd);
-                currentStart.setDate(currentStart.getDate() + 1);
-
-                // Small delay to be nice to the API
-                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (providerError) {
+                console.error(`Error syncing provider ${provider.name}: ${providerError.message}`);
             }
         }
-
-        console.log('--------------------------------------------------');
-        console.log('Full data sync completed successfully.');
-
     } catch (error) {
         console.error('Fatal error during full sync:', error);
     } finally {
@@ -89,18 +82,9 @@ const insertReadings = async (stationName, dataLoggerId, location, readings) => 
             station_name, station_id, latitude, longitude, timestamp,
             air_temperature, relative_humidity, wind_speed, wind_direction,
             precipitation, solar_radiation, atmospheric_pressure,
-            soil_temperature, battery_voltage,
-            wind_gust, lightning_strike_count, lightning_strike_distance,
-            vapor_pressure, humidity_sensor_temperature,
-            x_orientation, y_orientation, atoms_gen2,
-            north_wind_speed, east_wind_speed,
-            soil_electrical_conductivity, soil_ph,
-            panel_temperature, volumetric_water_content
+            soil_temperature, battery_voltage
         )
-        VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-            $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
-        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT (station_id, timestamp) DO UPDATE SET
             air_temperature = EXCLUDED.air_temperature,
             relative_humidity = EXCLUDED.relative_humidity,
@@ -110,54 +94,25 @@ const insertReadings = async (stationName, dataLoggerId, location, readings) => 
             solar_radiation = EXCLUDED.solar_radiation,
             atmospheric_pressure = EXCLUDED.atmospheric_pressure,
             soil_temperature = EXCLUDED.soil_temperature,
-            battery_voltage = EXCLUDED.battery_voltage,
-            wind_gust = EXCLUDED.wind_gust,
-            lightning_strike_count = EXCLUDED.lightning_strike_count,
-            lightning_strike_distance = EXCLUDED.lightning_strike_distance,
-            vapor_pressure = EXCLUDED.vapor_pressure,
-            humidity_sensor_temperature = EXCLUDED.humidity_sensor_temperature,
-            x_orientation = EXCLUDED.x_orientation,
-            y_orientation = EXCLUDED.y_orientation,
-            atoms_gen2 = EXCLUDED.atoms_gen2,
-            north_wind_speed = EXCLUDED.north_wind_speed,
-            east_wind_speed = EXCLUDED.east_wind_speed,
-            soil_electrical_conductivity = EXCLUDED.soil_electrical_conductivity,
-            soil_ph = EXCLUDED.soil_ph,
-            panel_temperature = EXCLUDED.panel_temperature,
-            volumetric_water_content = EXCLUDED.volumetric_water_content;
+            battery_voltage = EXCLUDED.battery_voltage;
     `;
 
     for (const record of readings) {
-        // Map API response fields to DB columns
         const params = [
             stationName,
             dataLoggerId,
-            location.latitude,
-            location.longitude,
+            location?.latitude || location?.coordinates?.[1],
+            location?.longitude || location?.coordinates?.[0],
             record.timestamp,
             record.airTemperature,
-            record.relativeHumidity != null ? Math.round(record.relativeHumidity * 100) : null, // Apply fix here too!
+            record.relativeHumidity != null ? Math.round(record.relativeHumidity * 100) : null,
             record.windSpeed,
             record.windDirection,
             record.precipitation,
             record.solarRadiation,
             record.atmosphericPressure,
             record.soilTemperature,
-            record.batteryVoltage,
-            record.windGust,
-            record.lightningStrikeCount,
-            record.lightningStrikeDistance,
-            record.vaporPressure,
-            record.humidityOfSensorTemperature,
-            record.xOrientation,
-            record.yOrientation,
-            record.atomsGen2,
-            record.northWindSpeed,
-            record.eastWindSpeed,
-            record.soilElectricalConductivity,
-            record.soilPH,
-            record.panelTemperature,
-            record.volumetricWaterContent
+            record.batteryVoltage
         ];
 
         try {
