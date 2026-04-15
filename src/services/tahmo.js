@@ -5,7 +5,7 @@ module.exports = {
     fetchDataLoggers: async () => {
         try {
             const auth = Buffer.from(`${config.tahmo.apiKey}:${config.tahmo.apiSecret}`).toString('base64');
-            const response = await axios.get(`${config.tahmo.baseUrl}/stations`, {
+            const response = await axios.get(`${config.tahmo.baseUrl}/assets/v2/stations`, {
                 headers: { 'Authorization': `Basic ${auth}` }
             });
 
@@ -36,45 +36,110 @@ module.exports = {
         }
     },
 
-    fetchWeatherData: async (startDate, endDate, stationId) => {
+    fetchWeatherData: async (startDate, endDate, stationId, collection = 'raw') => {
         try {
             const auth = Buffer.from(`${config.tahmo.apiKey}:${config.tahmo.apiSecret}`).toString('base64');
-            // TAHMO timeseries endpoint
-            const url = `${config.tahmo.baseUrl}/timeseries/${stationId}/hourly`;
+            
+            // TAHMO v2 expects ISO8601 timestamps. If only dates are provided, append time.
+            let start = startDate;
+            let end = endDate;
+            if (startDate.length === 10) start = `${startDate}T00:00:00Z`;
+            if (endDate.length === 10) end = `${endDate}T23:59:59Z`;
+
+            // TAHMO v2 measurements endpoint:
+            // {{baseURL}}/measurements/v2/stations/[stationCode]/measurements/[collection]
+            const url = `${config.tahmo.baseUrl}/measurements/v2/stations/${stationId}/measurements/${collection}`;
+            
+            console.log(`Fetching TAHMO data from: ${url}?start=${start}&end=${end}`);
+
             const response = await axios.get(url, {
                 params: {
-                    start: startDate,
-                    end: endDate
+                    start: start,
+                    end: end
                 },
                 headers: { 'Authorization': `Basic ${auth}` }
             });
 
-            // Map TAHMO data to standardized weather readings
-            // Note: TAHMO response structure needs to be checked, usually it's an array of measurements
+            // Search for the data block (columns and values) anywhere in the response
+            let dataSeries = null;
+            const search = (obj) => {
+                if (!obj || dataSeries) return;
+                if (obj.columns && obj.values && Array.isArray(obj.values) && obj.values.length > 0) {
+                    dataSeries = obj;
+                    return;
+                }
+                if (Array.isArray(obj)) {
+                    obj.forEach(search);
+                } else if (typeof obj === 'object') {
+                    Object.values(obj).forEach(search);
+                }
+            };
+            search(response.data);
+            
+            if (!dataSeries) {
+                console.log(`No valid measurement series found for station ${stationId}`);
+                return { success: true, data: { stationName: stationId, readings: [] } };
+            }
+
+            const { columns, values } = dataSeries;
+            const timeIdx = columns.indexOf('time');
+            const variableIdx = columns.indexOf('variable');
+            const valueIdx = columns.indexOf('value');
+
+            if (timeIdx === -1 || variableIdx === -1 || valueIdx === -1) {
+                console.error(`Incomplete columns in TAHMO response: ${columns}`);
+                return { success: true, data: { stationName: stationId, readings: [] } };
+            }
+
+            // Pivot the data: group multiple rows (one per variable) into a single object per timestamp
+            const groupedByTime = {};
+
+            values.forEach(row => {
+                const timestamp = row[timeIdx];
+                const variable = row[variableIdx];
+                const value = row[valueIdx];
+
+                if (!groupedByTime[timestamp]) {
+                    groupedByTime[timestamp] = { timestamp };
+                }
+
+                // Map ALL TAHMO variable codes to internal names
+                switch (variable) {
+                    case 'te': groupedByTime[timestamp].airTemperature = value; break;
+                    case 'rh': groupedByTime[timestamp].relativeHumidity = value; break;
+                    case 'ws': groupedByTime[timestamp].windSpeed = value; break;
+                    case 'wd': groupedByTime[timestamp].windDirection = value; break;
+                    case 'pr': groupedByTime[timestamp].precipitation = value; break;
+                    case 'ra': groupedByTime[timestamp].solarRadiation = value; break;
+                    case 'ap': groupedByTime[timestamp].atmosphericPressure = value; break;
+                    case 'lv': groupedByTime[timestamp].batteryVoltage = value / 1000; break;
+                    case 'wg': groupedByTime[timestamp].windGust = value; break;
+                    case 'ld': groupedByTime[timestamp].lightningStrikeDistance = value; break;
+                    case 'le': groupedByTime[timestamp].lightningStrikeCount = value; break;
+                    case 'ht': groupedByTime[timestamp].humiditySensorTemperature = value; break;
+                    case 'lt': groupedByTime[timestamp].loggerTemp = value; break;
+                    case 'lp': groupedByTime[timestamp].loggerPressure = value; break;
+                    case 'tx': groupedByTime[timestamp].xOrientation = value; break;
+                    case 'ty': groupedByTime[timestamp].yOrientation = value; break;
+                    case 'lb': groupedByTime[timestamp].loggerBatteryPercent = value; break;
+                }
+            });
+
+            const readings = Object.values(groupedByTime);
+            console.log(`Success! Fixed and parsed ${readings.length} weather readings (including all sensors) for ${stationId}`);
+
             return {
                 success: true,
                 data: {
                     stationName: stationId,
                     dataLoggerId: stationId,
-                    location: {
-                        latitude: null, // Should be fetched from station metadata if not here
-                        longitude: null
-                    },
-                    readings: response.data.map(record => ({
-                        timestamp: record.timestamp,
-                        airTemperature: record.temp,
-                        relativeHumidity: record.rh,
-                        windSpeed: record.ws,
-                        windDirection: record.wd,
-                        precipitation: record.pr,
-                        solar_radiation: record.sr,
-                        atmosphericPressure: record.pres,
-                        // Add other mappings as needed
-                    }))
+                    readings: readings
                 }
             };
         } catch (error) {
-            console.error(`Error fetching TAHMO weather data for ${stationId}:`, error.message);
+            const status = error.response ? error.response.status : 'unknown';
+            const data = error.response ? JSON.stringify(error.response.data) : '';
+            console.error(`Error fetching TAHMO weather data for ${stationId} (${status}): ${error.message} - ${data}`);
             throw error;
         }
     }

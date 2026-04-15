@@ -90,41 +90,108 @@ const syncData = async (shouldClosePool = false) => {
 
                         if (!logger.isActive) continue;
 
-                        const apiResponse = await provider.service.fetchWeatherData(startDate, endDate, logger._id);
-                        if (!apiResponse || !apiResponse.success || !apiResponse.data) continue;
+                        // For TAHMO, we fetch the last 1 year in chunks. 
+                        // For others, we just fetch today.
+                        const timeRanges = [];
+                        if (provider.name === 'TAHMO') {
+                            const now = new Date();
+                            const oneYearAgo = new Date();
+                            oneYearAgo.setFullYear(now.getFullYear() - 1);
 
-                        const { readings } = apiResponse.data;
-                        if (!readings || readings.length === 0) continue;
+                            let currentStart = new Date(oneYearAgo);
+                            while (currentStart < now) {
+                                let currentEnd = new Date(currentStart);
+                                currentEnd.setDate(currentStart.getDate() + 30);
+                                if (currentEnd > now) currentEnd = now;
+                                
+                                timeRanges.push({
+                                    start: currentStart.toISOString().split('T')[0],
+                                    end: currentEnd.toISOString().split('T')[0]
+                                });
+                                currentStart = new Date(currentEnd);
+                            }
+                        } else {
+                            const today = new Date().toISOString().split('T')[0];
+                            timeRanges.push({ start: today, end: today });
+                        }
 
-                        const insertQuery = `
-                            INSERT INTO weather_readings (
-                                station_name, station_id, latitude, longitude, timestamp,
-                                air_temperature, relative_humidity, wind_speed, wind_direction,
-                                precipitation, solar_radiation, atmospheric_pressure,
-                                soil_temperature, battery_voltage
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                            ON CONFLICT (station_id, timestamp) DO NOTHING;
-                        `;
+                        console.log(`Syncing ${logger._id} (${timeRanges.length} time slots)...`);
 
-                        for (const record of readings) {
-                            const params = [
-                                logger.stationName,
-                                logger._id,
-                                logger.location?.coordinates?.[1],
-                                logger.location?.coordinates?.[0],
-                                record.timestamp,
-                                record.airTemperature,
-                                record.relativeHumidity != null ? Math.round(record.relativeHumidity * 100) : null,
-                                record.windSpeed,
-                                record.windDirection,
-                                record.precipitation,
-                                record.solarRadiation,
-                                record.atmosphericPressure,
-                                record.soilTemperature,
-                                record.batteryVoltage
-                            ];
-                            await db.query(insertQuery, params).catch(e => console.error(`Insert error: ${e.message}`));
+                        for (const range of timeRanges) {
+                            const apiResponse = await provider.service.fetchWeatherData(range.start, range.end, logger._id);
+                            const { readings } = apiResponse.data;
+                            if (!readings || readings.length === 0) continue;
+
+                            const insertQuery = `
+                                INSERT INTO weather_readings (
+                                    station_name, station_id, latitude, longitude, timestamp,
+                                    air_temperature, relative_humidity, wind_speed, wind_direction,
+                                    precipitation, solar_radiation, atmospheric_pressure,
+                                    soil_temperature, battery_voltage, metadata,
+                                    wind_gust, lightning_strike_count, lightning_strike_distance,
+                                    x_orientation, y_orientation, humidity_sensor_temperature,
+                                    volumetric_water_content
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                                ON CONFLICT (station_id, timestamp) DO UPDATE SET
+                                    air_temperature = EXCLUDED.air_temperature,
+                                    relative_humidity = EXCLUDED.relative_humidity,
+                                    wind_speed = EXCLUDED.wind_speed,
+                                    wind_direction = EXCLUDED.wind_direction,
+                                    precipitation = EXCLUDED.precipitation,
+                                    solar_radiation = EXCLUDED.solar_radiation,
+                                    atmospheric_pressure = EXCLUDED.atmospheric_pressure,
+                                    wind_gust = EXCLUDED.wind_gust,
+                                    lightning_strike_count = EXCLUDED.lightning_strike_count,
+                                    lightning_strike_distance = EXCLUDED.lightning_strike_distance,
+                                    x_orientation = EXCLUDED.x_orientation,
+                                    y_orientation = EXCLUDED.y_orientation,
+                                    humidity_sensor_temperature = EXCLUDED.humidity_sensor_temperature,
+                                    volumetric_water_content = EXCLUDED.volumetric_water_content,
+                                    metadata = EXCLUDED.metadata;
+                            `;
+
+                            for (const record of readings) {
+                                const {
+                                    timestamp, airTemperature, relativeHumidity, windSpeed, 
+                                    windDirection, precipitation, solarRadiation, 
+                                    atmosphericPressure, soilTemperature, batteryVoltage,
+                                    windGust, lightningStrikeCount, lightningStrikeDistance,
+                                    xOrientation, yOrientation, humiditySensorTemperature,
+                                    volumetricWaterContent,
+                                    ...rest
+                                } = record;
+
+                                const params = [
+                                    logger.stationName,
+                                    logger._id,
+                                    logger.location?.coordinates?.[1],
+                                    logger.location?.coordinates?.[0],
+                                    timestamp,
+                                    airTemperature,
+                                    relativeHumidity != null ? Math.round(relativeHumidity * 100) : null,
+                                    windSpeed,
+                                    windDirection,
+                                    precipitation,
+                                    solarRadiation,
+                                    atmosphericPressure,
+                                    soilTemperature,
+                                    batteryVoltage,
+                                    JSON.stringify(rest),
+                                    windGust,
+                                    lightningStrikeCount,
+                                    lightningStrikeDistance,
+                                    xOrientation,
+                                    yOrientation,
+                                    humiditySensorTemperature,
+                                    volumetricWaterContent
+                                ];
+                                await db.query(insertQuery, params).catch(e => {
+                                    if (!e.message.includes('unique constraint')) {
+                                        console.error(`Insert error for ${logger._id}: ${e.message}`);
+                                    }
+                                });
+                            }
                         }
                     } catch (loggerError) {
                         console.error(`Error processing logger ${logger._id}: ${loggerError.message}`);
