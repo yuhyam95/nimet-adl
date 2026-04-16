@@ -1,0 +1,26 @@
+{
+  "TAHMO": {
+    "te": "airTemperature",
+    "rh": "relativeHumidity",
+    "ws": "windSpeed",
+    "wd": "windDirection",
+    "pr": "precipitation",
+    "ra": "solarRadiation",
+    "ap": "atmosphericPressure",
+    "lv": "batteryVoltage",
+    "wg": "windGust",
+    "ld": "lightningStrikeDistance",
+    "le": "lightningStrikeCount",
+    "ht": "humiditySensorTemperature",
+    "lt": "loggerTemp",
+    "lp": "loggerPressure",
+    "tx": "xOrientation",
+    "ty": "yOrientation",
+    "lb": "loggerBatteryPercent"
+  },
+  "CLIMDES": {
+    "__comment": "CLIMDES response already matches internal names, but added here for future flexibility.",
+    "temp": "airTemperature",
+    "hum": "relativeHumidity"
+  }
+}

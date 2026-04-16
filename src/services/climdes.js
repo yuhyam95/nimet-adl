@@ -56,7 +56,53 @@ module.exports = {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
-            return weatherResponse.data;
+            // Standardize output and apply dynamic mappings
+            const db = require('../db/index.js');
+            const mappingResult = await db.query(
+                "SELECT external_key, internal_field, conversion_formula FROM provider_mappings WHERE provider = 'CLIMDES' AND is_active = true"
+            );
+            
+            const mappings = {};
+            mappingResult.rows.forEach(row => {
+                mappings[row.external_key] = {
+                    field: row.internal_field,
+                    formula: row.conversion_formula
+                };
+            });
+
+            const rawReadings = weatherResponse.data.data?.readings || [];
+            const mappedReadings = rawReadings.map(reading => {
+                const mapped = { timestamp: reading.timestamp };
+                
+                Object.entries(reading).forEach(([key, value]) => {
+                    if (key === 'timestamp') return;
+
+                    const mapping = mappings[key];
+                    const internalField = mapping ? mapping.field : key;
+                    
+                    let finalValue = value;
+                    if (mapping && mapping.formula) {
+                        try {
+                            if (mapping.formula.includes('x')) {
+                                const formula = mapping.formula.replace(/x/g, value);
+                                finalValue = eval(formula);
+                            }
+                        } catch (e) {
+                            console.error(`Error applying formula ${mapping.formula} to ${key}:`, e.message);
+                        }
+                    }
+                    mapped[internalField] = finalValue;
+                });
+                return mapped;
+            });
+
+            return {
+                success: true,
+                data: {
+                    stationName: loggerId,
+                    readings: mappedReadings
+                }
+            };
 
         } catch (error) {
             console.error('CLIMDES API Error:', error.message);

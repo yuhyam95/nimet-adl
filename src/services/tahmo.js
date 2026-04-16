@@ -94,6 +94,20 @@ module.exports = {
             // Pivot the data: group multiple rows (one per variable) into a single object per timestamp
             const groupedByTime = {};
 
+            // Dynamic Mapping from the database
+            const db = require('../db/index.js');
+            const mappingResult = await db.query(
+                "SELECT external_key, internal_field, conversion_formula FROM provider_mappings WHERE provider = 'TAHMO' AND is_active = true"
+            );
+            
+            const mappings = {};
+            mappingResult.rows.forEach(row => {
+                mappings[row.external_key] = {
+                    field: row.internal_field,
+                    formula: row.conversion_formula
+                };
+            });
+
             values.forEach(row => {
                 const timestamp = row[timeIdx];
                 const variable = row[variableIdx];
@@ -103,30 +117,31 @@ module.exports = {
                     groupedByTime[timestamp] = { timestamp };
                 }
 
-                // Map ALL TAHMO variable codes to internal names
-                switch (variable) {
-                    case 'te': groupedByTime[timestamp].airTemperature = value; break;
-                    case 'rh': groupedByTime[timestamp].relativeHumidity = value; break;
-                    case 'ws': groupedByTime[timestamp].windSpeed = value; break;
-                    case 'wd': groupedByTime[timestamp].windDirection = value; break;
-                    case 'pr': groupedByTime[timestamp].precipitation = value; break;
-                    case 'ra': groupedByTime[timestamp].solarRadiation = value; break;
-                    case 'ap': groupedByTime[timestamp].atmosphericPressure = value; break;
-                    case 'lv': groupedByTime[timestamp].batteryVoltage = value / 1000; break;
-                    case 'wg': groupedByTime[timestamp].windGust = value; break;
-                    case 'ld': groupedByTime[timestamp].lightningStrikeDistance = value; break;
-                    case 'le': groupedByTime[timestamp].lightningStrikeCount = value; break;
-                    case 'ht': groupedByTime[timestamp].humiditySensorTemperature = value; break;
-                    case 'lt': groupedByTime[timestamp].loggerTemp = value; break;
-                    case 'lp': groupedByTime[timestamp].loggerPressure = value; break;
-                    case 'tx': groupedByTime[timestamp].xOrientation = value; break;
-                    case 'ty': groupedByTime[timestamp].yOrientation = value; break;
-                    case 'lb': groupedByTime[timestamp].loggerBatteryPercent = value; break;
+                const mapping = mappings[variable];
+                const internalField = mapping ? mapping.field : variable;
+                
+                let finalValue = value;
+                if (mapping && mapping.formula) {
+                    try {
+                        // Simple and safe evaluation for "x / 1000" style formulas
+                        if (mapping.formula === 'x / 1000') {
+                            finalValue = value / 1000;
+                        } else if (mapping.formula.includes('x')) {
+                            // Basic support for other simple formulas if needed
+                            // Note: In a production environment, use a proper math parser
+                            const formula = mapping.formula.replace(/x/g, value);
+                            finalValue = eval(formula); 
+                        }
+                    } catch (e) {
+                        console.error(`Error applying formula ${mapping.formula} to value ${value}:`, e.message);
+                    }
                 }
+                
+                groupedByTime[timestamp][internalField] = finalValue;
             });
 
             const readings = Object.values(groupedByTime);
-            console.log(`Success! Fixed and parsed ${readings.length} weather readings (including all sensors) for ${stationId}`);
+            console.log(`Success! Fixed and parsed ${readings.length} weather readings for ${stationId}`);
 
             return {
                 success: true,

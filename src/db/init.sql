@@ -20,3 +20,14 @@ CREATE TABLE IF NOT EXISTS weather_readings (
 
 CREATE INDEX idx_weather_timestamp ON weather_readings(timestamp);
 CREATE INDEX idx_weather_station ON weather_readings(station_id);
+
+CREATE TABLE IF NOT EXISTS provider_mappings (
+    id SERIAL PRIMARY KEY,
+    provider VARCHAR(50) NOT NULL,
+    external_key VARCHAR(100) NOT NULL,
+    internal_field VARCHAR(100) NOT NULL,
+    conversion_formula VARCHAR(255) DEFAULT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, external_key)
+);

@@ -188,6 +188,58 @@ app.post('/api/config', (req, res) => {
     }
 });
 
+// 6. Get all mappings for a specific provider
+app.get('/api/mappings/:provider', async (req, res) => {
+    try {
+        const { provider } = req.params;
+        const result = await db.query(
+            "SELECT * FROM provider_mappings WHERE provider = $1 ORDER BY external_key",
+            [provider.toUpperCase()]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (error) {
+        console.error('Error fetching mappings:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+});
+
+// 7. Create or update a mapping
+app.post('/api/mappings', async (req, res) => {
+    try {
+        const { provider, external_key, internal_field, conversion_formula } = req.body;
+        
+        if (!provider || !external_key || !internal_field) {
+            return res.status(400).json({ success: false, message: 'Missing required fields' });
+        }
+
+        const result = await db.query(`
+            INSERT INTO provider_mappings (provider, external_key, internal_field, conversion_formula)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (provider, external_key) DO UPDATE SET
+                internal_field = EXCLUDED.internal_field,
+                conversion_formula = EXCLUDED.conversion_formula
+            RETURNING *
+        `, [provider.toUpperCase(), external_key, internal_field, conversion_formula || null]);
+
+        res.json({ success: true, data: result.rows[0], message: 'Mapping saved successfully' });
+    } catch (error) {
+        console.error('Error saving mapping:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+});
+
+// 8. Delete a mapping
+app.delete('/api/mappings/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db.query("DELETE FROM provider_mappings WHERE id = $1", [id]);
+        res.json({ success: true, message: 'Mapping deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting mapping:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+});
+
 // --- START SERVER ---
 
 app.listen(port, () => {

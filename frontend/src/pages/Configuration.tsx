@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
 import { Settings, Server, Database, Shield, CheckCircle, AlertCircle, RefreshCw, Edit2, Save, X } from 'lucide-react';
 import { Skeleton } from '../components/ui/Skeleton';
+import MappingManager from '../components/MappingManager';
 import styles from './Configuration.module.css';
 
 interface ProviderConfig {
@@ -237,6 +238,17 @@ const Configuration = () => {
                         ))}
                     </div>
                 )}
+            </div>
+
+            <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                    <Database size={20} />
+                    <h2>Variable Mappings</h2>
+                </div>
+                <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '14px' }}>
+                    Configure how external provider keys map to your internal database fields.
+                </p>
+                <MappingManager />
             </div>
 
             <div className={styles.section}>
