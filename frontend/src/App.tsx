@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import Stations from './pages/Stations';
 import StationDetails from './pages/StationDetails';
 import Configuration from './pages/Configuration';
+import UserManagement from './pages/UserManagement';
+import Profile from './pages/Profile';
 import Login from './pages/Login';
 import './styles/global.css';
 
@@ -53,13 +55,13 @@ function App() {
 
             <Route path="/profile" element={
               <ProtectedRoute>
-                <MainLayout><div>Profile Component coming soon...</div></MainLayout>
+                <MainLayout><Profile /></MainLayout>
               </ProtectedRoute>
             } />
 
             <Route path="/users" element={
               <ProtectedRoute allowedRoles={['Admin']}>
-                <MainLayout><div>User Management coming soon...</div></MainLayout>
+                <MainLayout><UserManagement /></MainLayout>
               </ProtectedRoute>
             } />
 

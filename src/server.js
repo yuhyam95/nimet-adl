@@ -337,7 +337,94 @@ app.get('/api/auth/me', protect(), (req, res) => {
     });
 });
 
-// 11. Health check and monitoring
+// 11. User Management (Admin only)
+app.get('/api/users', protect(['Admin']), async (req, res) => {
+    try {
+        const result = await db.query('SELECT id, username, name, role, created_at FROM users ORDER BY created_at DESC');
+        res.json({ success: true, data: result.rows });
+    } catch (error) {
+        console.error('Fetch users error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch users' });
+    }
+});
+
+app.post('/api/users', protect(['Admin']), async (req, res) => {
+    try {
+        const { username, name, role, password } = req.body;
+        
+        if (!username || !password || !role) {
+            return res.status(400).json({ success: false, message: 'Username, password and role are required' });
+        }
+
+        const passwordHash = await hashPassword(password);
+        await db.query(
+            'INSERT INTO users (username, name, role, password) VALUES ($1, $2, $3, $4)',
+            [username, name, role, passwordHash]
+        );
+
+        res.json({ success: true, message: 'User created successfully' });
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).json({ success: false, message: 'Username already exists' });
+        }
+        console.error('Create user error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create user' });
+    }
+});
+
+app.delete('/api/users/:id', protect(['Admin']), async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        if (parseInt(id) === req.user.id) {
+            return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+        }
+
+        await db.query('DELETE FROM users WHERE id = $1', [id]);
+        res.json({ success: true, message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Delete user error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete user' });
+    }
+});
+
+app.patch('/api/users/:id/role', protect(['Admin']), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { role } = req.body;
+
+        if (!role) return res.status(400).json({ success: false, message: 'Role is required' });
+
+        await db.query('UPDATE users SET role = $1 WHERE id = $2', [role, id]);
+        res.json({ success: true, message: 'User role updated successfully' });
+    } catch (error) {
+        console.error('Update role error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update user role' });
+    }
+});
+
+app.post('/api/auth/change-password', protect(), async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        
+        const result = await db.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+        const user = result.rows[0];
+
+        if (!(await comparePassword(currentPassword, user.password))) {
+            return res.status(400).json({ success: false, message: 'Incorrect current password' });
+        }
+
+        const newHash = await hashPassword(newPassword);
+        await db.query('UPDATE users SET password = $1 WHERE id = $2', [newHash, req.user.id]);
+
+        res.json({ success: true, message: 'Password changed successfully' });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ success: false, error: 'Failed to change password' });
+    }
+});
+
+// 12. Health check and monitoring
 app.get('/api/health', (req, res) => {
     res.json({
         success: true,

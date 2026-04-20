@@ -1,0 +1,273 @@
+.container {
+    padding: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 40px;
+}
+
+.titleSection {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.titleSection h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+    color: #111827;
+}
+
+.titleSection p {
+    color: #6b7280;
+    margin: 4px 0 0 0;
+}
+
+.icon {
+    color: #2563eb;
+    background: #eff6ff;
+    padding: 12px;
+    border-radius: 12px;
+}
+
+.createBtn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.createBtn:hover {
+    background: #1d4ed8;
+}
+
+.userList {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.tableHeader {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 100px;
+    padding: 16px 24px;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #4b5563;
+}
+
+.userRow {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 100px;
+    padding: 20px 24px;
+    align-items: center;
+    border-bottom: 1px solid #f3f4f6;
+    transition: background 0.2s;
+}
+
+.userRow:last-child {
+    border-bottom: none;
+}
+
+.userRow:hover {
+    background: #f9fafb;
+}
+
+.userInfo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.avatar {
+    width: 40px;
+    height: 40px;
+    background: #2563eb;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.userName {
+    font-weight: 600;
+    color: #111827;
+}
+
+.userMeta {
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+.roleSelect {
+    padding: 6px 12px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    outline: none;
+}
+
+.roleAdmin { background: #fee2e2; color: #991b1b; }
+.roleDataManager { background: #fef3c7; color: #92400e; }
+.roleDataViewer { background: #dcfce7; color: #166534; }
+
+.dateInfo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+    color: #4b5563;
+}
+
+.deleteBtn {
+    padding: 8px;
+    color: #9ca3af;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.deleteBtn:hover {
+    color: #ef4444;
+    background: #fee2e2;
+}
+
+/* Modal Styling */
+.modalOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal {
+    background: white;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 500px;
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.modalHeader {
+    padding: 24px;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modalHeader h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.closeBtn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #9ca3af;
+    cursor: pointer;
+}
+
+.form {
+    padding: 24px;
+}
+
+.formGrid {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.formGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.formGroup label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #4b5563;
+}
+
+.formGroup input, .formGroup select {
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    outline: none;
+}
+
+.formGroup input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+.modalActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 32px;
+}
+
+.saveBtn {
+    padding: 10px 20px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.cancelBtn {
+    padding: 10px 20px;
+    background: white;
+    border: 1px solid #d1d5db;
+    color: #4b5563;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.loading {
+    display: flex;
+    justify-content: center;
+    padding: 100px;
+    color: #6b7280;
+}
