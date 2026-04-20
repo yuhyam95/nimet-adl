@@ -12,7 +12,10 @@ import {
     ArrowRight,
     Gauge,
     CloudRain,
-    Sun
+    Sun,
+    ShieldCheck,
+    AlertTriangle,
+    FileSpreadsheet
 } from 'lucide-react';
 import { Skeleton } from '../components/ui/Skeleton';
 import styles from './Dashboard.module.css';
@@ -37,6 +40,15 @@ interface Station {
 }
 
 const Dashboard = () => {
+    const { data: health, isLoading: healthLoading } = useQuery({
+        queryKey: ['health'],
+        queryFn: async () => {
+            const res = await axios.get('/api/health');
+            return res.data;
+        },
+        refetchInterval: 60000, // Poll every minute
+    });
+
     const { data: stations = [], isLoading, isError, error, refetch } = useQuery({
         queryKey: ['stations'],
         queryFn: async () => {
@@ -148,20 +160,32 @@ const Dashboard = () => {
         <div className={styles.dashboard}>
             <div className={styles.statsGrid}>
                 <div className={styles.statCard}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <h3>Data Synchronization</h3>
+                        {health?.lastSync?.status === 'success' ? <ShieldCheck size={18} color="#059669" /> : <AlertTriangle size={18} color="#ef4444" />}
+                    </div>
+                    <div className={styles.healthValue}>
+                        {health?.lastSync?.time ? new Date(health.lastSync.time).toLocaleTimeString() : 'Waiting...'}
+                    </div>
+                    <p className={styles.healthLabel}>Last Successful Sync</p>
+                </div>
+                <div className={styles.statCard}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <h3>CSV Exports</h3>
+                        <FileSpreadsheet size={18} color="#2563eb" />
+                    </div>
+                    <div className={styles.healthValue}>
+                        {health?.lastExport?.time ? new Date(health.lastExport.time).toLocaleTimeString() : 'Waiting...'}
+                    </div>
+                    <p className={styles.healthLabel}>Last CSV Dump</p>
+                </div>
+                <div className={styles.statCard}>
                     <h3>Total Stations</h3>
                     <div className={styles.value}>{stats.totalStations}</div>
                 </div>
                 <div className={styles.statCard}>
                     <h3>Active Stations</h3>
                     <div className={styles.value} style={{ color: '#059669' }}>{stats.activeStations}</div>
-                </div>
-                <div className={styles.statCard}>
-                    <h3>Avg. Temperature</h3>
-                    <div className={styles.value}>{stats.avgTemp.toFixed(1)}°C</div>
-                </div>
-                <div className={styles.statCard}>
-                    <h3>Avg. Humidity</h3>
-                    <div className={styles.value}>{stats.avgHumidity.toFixed(1)}%</div>
                 </div>
             </div>
 

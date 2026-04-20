@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 module.exports = {
   get db() {
@@ -27,5 +28,8 @@ module.exports = {
       apiKey: process.env.TAHMO_API_KEY,
       apiSecret: process.env.TAHMO_API_SECRET
     };
+  },
+  get exportPath() {
+    return process.env.EXPORT_PATH || path.join(process.cwd(), 'exports');
   }
 };

@@ -20,7 +20,6 @@ const migrate = async () => {
         `);
 
         for (const [provider, vars] of Object.entries(mappings)) {
-            if (provider === 'CLIMDES' && vars.__comment) continue;
 
             for (const [externalKey, internalField] of Object.entries(vars)) {
                 if (externalKey === '__comment') continue;

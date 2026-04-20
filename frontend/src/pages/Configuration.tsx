@@ -17,13 +17,20 @@ interface ProviderConfig {
 const Configuration = () => {
     const [editing, setEditing] = React.useState<string | null>(null);
     const [formData, setFormData] = React.useState<any>({});
+    const [systemData, setSystemData] = React.useState<any>({});
     const [saving, setSaving] = React.useState(false);
+    const [syncDates, setSyncDates] = React.useState<any>({});
+    const [syncing, setSyncing] = React.useState<string | null>(null);
 
     const { data, isLoading, isError, error, refetch } = useQuery({
         queryKey: ['config'],
         queryFn: async () => {
             const res = await axios.get('/api/config');
-            return res.data.success ? res.data.data : null;
+            if (res.data.success) {
+                setSystemData({ exportPath: res.data.data.exportPath });
+                return res.data.data;
+            }
+            return null;
         }
     });
 
@@ -76,6 +83,53 @@ const Configuration = () => {
             alert('Failed to save configuration.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleSaveSystem = async () => {
+        setSaving(true);
+        try {
+            const res = await axios.post('/api/config', {
+                system: systemData
+            });
+            if (res.data.success) {
+                alert('System settings updated successfully!');
+                setEditing(null);
+                refetch();
+            }
+        } catch (error) {
+            console.error('Failed to save system settings:', error);
+            alert('Failed to save system settings.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleManualSync = async (providerName: string) => {
+        const dates = syncDates[providerName];
+        const startDate = dates?.start;
+        const endDate = dates?.end;
+
+        if (!startDate || !endDate) {
+            alert('Please select both start and end dates.');
+            return;
+        }
+
+        setSyncing(providerName);
+        try {
+            const res = await axios.post('/api/sync/provider', {
+                provider: providerName,
+                startDate,
+                endDate
+            });
+            if (res.data.success) {
+                alert(res.data.message);
+            }
+        } catch (error) {
+            console.error('Manual sync failed:', error);
+            alert('Failed to start manual synchronization.');
+        } finally {
+            setSyncing(null);
         }
     };
 
@@ -225,6 +279,42 @@ const Configuration = () => {
                                             </div>
                                         </>
                                     )}
+
+                                    {provider.isActive && (
+                                        <div className={styles.syncBox}>
+                                            <h4>Manual Data Sync</h4>
+                                            <div className={styles.syncDates}>
+                                                <div className={styles.syncDateGroup}>
+                                                    <label>From</label>
+                                                    <input 
+                                                        type="date" 
+                                                        onChange={(e) => setSyncDates({
+                                                            ...syncDates, 
+                                                            [provider.name]: { ...syncDates[provider.name], start: e.target.value } 
+                                                        })}
+                                                    />
+                                                </div>
+                                                <div className={styles.syncDateGroup}>
+                                                    <label>To</label>
+                                                    <input 
+                                                        type="date"
+                                                        onChange={(e) => setSyncDates({
+                                                            ...syncDates, 
+                                                            [provider.name]: { ...syncDates[provider.name], end: e.target.value } 
+                                                        })}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <button 
+                                                className={styles.syncBtn}
+                                                onClick={() => handleManualSync(provider.name)}
+                                                disabled={syncing === provider.name}
+                                            >
+                                                {syncing === provider.name ? <RefreshCw size={14} className={styles.spinning} /> : <RefreshCw size={14} />}
+                                                {syncing === provider.name ? 'Syncing...' : 'Start Manual Sync'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 <div className={styles.cardFooter}>
@@ -249,6 +339,63 @@ const Configuration = () => {
                     Configure how external provider keys map to your internal database fields.
                 </p>
                 <MappingManager />
+            </div>
+
+            <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                    <Settings size={20} />
+                    <h2>System Settings</h2>
+                </div>
+                <div className={styles.card}>
+                    <div className={styles.cardHeader}>
+                        <div className={styles.providerLogo}>
+                            <Database size={24} />
+                            <h3>Export Configuration</h3>
+                        </div>
+                        {editing !== 'system' && (
+                            <button onClick={() => setEditing('system')} className={styles.editBtn}>
+                                <Edit2 size={14} />
+                            </button>
+                        )}
+                    </div>
+                    <div className={styles.cardBody}>
+                        {editing === 'system' ? (
+                            <div className={styles.editForm}>
+                                <div className={styles.formGroup}>
+                                    <label>CSV Export Directory Path</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="/absolute/path/to/exports"
+                                        value={systemData.exportPath} 
+                                        onChange={e => setSystemData({...systemData, exportPath: e.target.value})}
+                                    />
+                                    <p className={styles.helperText} style={{ marginTop: '8px' }}>
+                                        Absolute path where CSV files will be dumped periodically. 
+                                        If left empty, a default 'exports' folder in the project root will be used.
+                                    </p>
+                                </div>
+                                <div className={styles.formActions}>
+                                    <button onClick={() => setEditing(null)} className={styles.cancelBtn}>
+                                        <X size={14} /> Cancel
+                                    </button>
+                                    <button onClick={handleSaveSystem} disabled={saving} className={styles.saveBtn}>
+                                        <Save size={14} /> {saving ? 'Saving...' : 'Save Settings'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className={styles.infoRow}>
+                                <span className={styles.label}>Export Directory</span>
+                                <span className={styles.value}>{data?.exportPath || 'Default (project root/exports)'}</span>
+                            </div>
+                        )}
+                    </div>
+                    <div className={styles.cardFooter}>
+                        <p className={styles.helperText}>
+                            CSV files for all stations are automatically generated and updated every 15 minutes.
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <div className={styles.section}>

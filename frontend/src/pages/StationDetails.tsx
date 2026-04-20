@@ -14,7 +14,7 @@ import {
     Legend,
     ResponsiveContainer
 } from 'recharts';
-import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Thermometer, Droplets, Wind, Compass, CloudRain } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -374,6 +374,66 @@ const StationDetails = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Latest Readings Cards */}
+            {!isLoadingReadings && paginatedReadings.length > 0 && (
+                <div className={styles.statsGrid}>
+                    <div className={styles.statCard}>
+                        <div className={styles.statIcon} style={{ background: '#fee2e2', color: '#dc2626' }}>
+                            <Thermometer size={24} />
+                        </div>
+                        <div className={styles.statLabel}>Temperature</div>
+                        <div className={styles.statValue}>
+                            {paginatedReadings[0].air_temperature}
+                            <span className={styles.statUnit}>°C</span>
+                        </div>
+                    </div>
+
+                    <div className={styles.statCard}>
+                        <div className={styles.statIcon} style={{ background: '#e0f2fe', color: '#0284c7' }}>
+                            <Droplets size={24} />
+                        </div>
+                        <div className={styles.statLabel}>Humidity</div>
+                        <div className={styles.statValue}>
+                            {paginatedReadings[0].relative_humidity}
+                            <span className={styles.statUnit}>%</span>
+                        </div>
+                    </div>
+
+                    <div className={styles.statCard}>
+                        <div className={styles.statIcon} style={{ background: '#fef3c7', color: '#d97706' }}>
+                            <Wind size={24} />
+                        </div>
+                        <div className={styles.statLabel}>Wind Speed</div>
+                        <div className={styles.statValue}>
+                            {paginatedReadings[0].wind_speed}
+                            <span className={styles.statUnit}>m/s</span>
+                        </div>
+                    </div>
+
+                    <div className={styles.statCard}>
+                        <div className={styles.statIcon} style={{ background: '#f5f3ff', color: '#7c3aed' }}>
+                            <Compass size={24} />
+                        </div>
+                        <div className={styles.statLabel}>Wind Direction</div>
+                        <div className={styles.statValue}>
+                            {paginatedReadings[0].wind_direction ?? '-'}
+                            <span className={styles.statUnit}>°</span>
+                        </div>
+                    </div>
+
+                    <div className={styles.statCard}>
+                        <div className={styles.statIcon} style={{ background: '#dcfce7', color: '#16a34a' }}>
+                            <CloudRain size={24} />
+                        </div>
+                        <div className={styles.statLabel}>Precipitation</div>
+                        <div className={styles.statValue}>
+                            {paginatedReadings[0].precipitation ?? '0'}
+                            <span className={styles.statUnit}>mm</span>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className={styles.chartsGrid}>
                 {/* Station Overview & Map */}

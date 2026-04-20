@@ -14,7 +14,46 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-bottom: 8px;
+}
+
+.filters {
+    display: flex;
+    gap: 16px;
     margin-bottom: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.filterGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.filterLabel {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.select {
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background-color: white;
+    font-size: 0.875rem;
+    color: var(--text-main);
+    min-width: 150px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.select:focus {
+    border-color: var(--primary);
 }
 
 .toggleContainer {

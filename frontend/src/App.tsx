@@ -1,17 +1,20 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './components/Layout/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Stations from './pages/Stations';
 import StationDetails from './pages/StationDetails';
 import Configuration from './pages/Configuration';
+import Login from './pages/Login';
 import './styles/global.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false, // Optional: prevent refetch on window focus
-      retry: 1, // Optional: reduce retries on failure
+      refetchOnWindowFocus: false,
+      retry: 1,
     },
   },
 });
@@ -19,20 +22,55 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <MainLayout>
+      <AuthProvider>
+        <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/stations" element={<Stations />} />
-            <Route path="/stations/:id" element={<StationDetails />} />
-            <Route path="/dispatch" element={<div>Dispatch Channels</div>} />
-            <Route path="/configuration" element={<Configuration />} />
-            <Route path="/users" element={<div>User Management</div>} />
-            <Route path="/profile" element={<div>Profile</div>} />
-            <Route path="/weather" element={<div>Weather Data Table coming soon...</div>} />
+            <Route path="/login" element={<Login />} />
+            
+            <Route path="/" element={
+              <ProtectedRoute>
+                <MainLayout><Dashboard /></MainLayout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/stations" element={
+              <ProtectedRoute>
+                <MainLayout><Stations /></MainLayout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/stations/:id" element={
+              <ProtectedRoute>
+                <MainLayout><StationDetails /></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/configuration" element={
+              <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
+                <MainLayout><Configuration /></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <MainLayout><div>Profile Component coming soon...</div></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/users" element={
+              <ProtectedRoute allowedRoles={['Admin']}>
+                <MainLayout><div>User Management coming soon...</div></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/weather" element={
+              <ProtectedRoute>
+                <MainLayout><div>Weather Data Table coming soon...</div></MainLayout>
+              </ProtectedRoute>
+            } />
           </Routes>
-        </MainLayout>
-      </BrowserRouter>
+        </BrowserRouter>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

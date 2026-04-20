@@ -2,13 +2,25 @@ const express = require('express');
 const cors = require('cors');
 const db = require('./db/index.js');
 const climdesService = require('./services/climdes.js');
-const { syncData } = require('./index.js');
+const { syncData, syncProviderData } = require('./index.js');
+const { exportAllStationsToCSV } = require('./utils/exporter.js');
+const { hashPassword, comparePassword, generateToken } = require('./utils/auth.js');
+const { protect } = require('./middleware/auth.js');
 
 const app = express();
 const port = 3000; // You can change this port as needed
 
 app.use(cors());
 app.use(express.json());
+
+// System state for monitoring
+let systemStatus = {
+    lastSyncAt: null,
+    lastSyncStatus: 'never',
+    lastExportAt: null,
+    lastExportStatus: 'never',
+    uptime: new Date()
+};
 
 // --- ROUTES ---
 
@@ -17,7 +29,7 @@ app.use(express.json());
 // - limit: number of records to return (default 50)
 // - stationId: filter by station ID
 // - startDate, endDate: filter by date range
-app.get('/api/weather', async (req, res) => {
+app.get('/api/weather', protect(['Admin', 'Data Manager', 'Data Viewer']), async (req, res) => {
     try {
         const { limit = 50, stationId, startDate, endDate } = req.query;
         let queryArgs = [];
@@ -64,7 +76,7 @@ app.get('/api/weather', async (req, res) => {
 
 // 2. Get active data loggers from local database
 // Retrieves distinct stations that have data recorded
-app.get('/api/dataloggers', async (req, res) => {
+app.get('/api/dataloggers', protect(['Admin', 'Data Manager', 'Data Viewer']), async (req, res) => {
     try {
         const query = `
       SELECT DISTINCT ON (s.station_id) 
@@ -135,7 +147,7 @@ app.get('/api/external/pysical-dataloggers', async (req, res) => {
 const configManager = require('./utils/configManager.js');
 
 // 4. Get active providers and their basic configuration (masked)
-app.get('/api/config', (req, res) => {
+app.get('/api/config', protect(['Admin', 'Data Manager']), (req, res) => {
     const config = require('./config/index.js');
     res.json({
         success: true,
@@ -155,28 +167,31 @@ app.get('/api/config', (req, res) => {
                     password: config.tahmo.apiSecret ? '********' : null,
                     isActive: !!config.tahmo.apiKey && !!config.tahmo.apiSecret
                 }
-            ]
+            ],
+            exportPath: config.exportPath
         }
     });
 });
 
 // 5. Update configuration
-app.post('/api/config', (req, res) => {
-    const { provider, credentials } = req.body;
+app.post('/api/config', protect(['Admin']), (req, res) => {
+    const { provider, credentials, system } = req.body;
     
-    if (!provider || !credentials) {
-        return res.status(400).json({ success: false, message: 'Missing provider or credentials' });
+    if (!provider && !credentials && !system) {
+        return res.status(400).json({ success: false, message: 'Missing configuration update details' });
     }
 
     const updates = {};
-    if (provider === 'CLIMDES') {
+    if (provider === 'CLIMDES' && credentials) {
         if (credentials.email) updates.API_EMAIL = credentials.email;
         if (credentials.password) updates.API_PASSWORD = credentials.password;
         if (credentials.baseUrl) updates.API_BASE_URL = credentials.baseUrl;
-    } else if (provider === 'TAHMO') {
+    } else if (provider === 'TAHMO' && credentials) {
         if (credentials.apiKey) updates.TAHMO_API_KEY = credentials.apiKey;
         if (credentials.apiSecret) updates.TAHMO_API_SECRET = credentials.apiSecret;
         if (credentials.baseUrl) updates.TAHMO_API_BASE_URL = credentials.baseUrl;
+    } else if (system) {
+        if (system.exportPath) updates.EXPORT_PATH = system.exportPath;
     }
 
     const success = configManager.updateEnv(updates);
@@ -189,7 +204,7 @@ app.post('/api/config', (req, res) => {
 });
 
 // 6. Get all mappings for a specific provider
-app.get('/api/mappings/:provider', async (req, res) => {
+app.get('/api/mappings/:provider', protect(['Admin', 'Data Manager']), async (req, res) => {
     try {
         const { provider } = req.params;
         const result = await db.query(
@@ -204,7 +219,7 @@ app.get('/api/mappings/:provider', async (req, res) => {
 });
 
 // 7. Create or update a mapping
-app.post('/api/mappings', async (req, res) => {
+app.post('/api/mappings', protect(['Admin', 'Data Manager']), async (req, res) => {
     try {
         const { provider, external_key, internal_field, conversion_formula } = req.body;
         
@@ -229,7 +244,7 @@ app.post('/api/mappings', async (req, res) => {
 });
 
 // 8. Delete a mapping
-app.delete('/api/mappings/:id', async (req, res) => {
+app.delete('/api/mappings/:id', protect(['Admin']), async (req, res) => {
     try {
         const { id } = req.params;
         await db.query("DELETE FROM provider_mappings WHERE id = $1", [id]);
@@ -240,7 +255,104 @@ app.delete('/api/mappings/:id', async (req, res) => {
     }
 });
 
-// --- START SERVER ---
+// 9. Export all stations to CSV
+app.post('/api/export/csv', protect(['Admin', 'Data Manager']), async (req, res) => {
+    try {
+        const result = await exportAllStationsToCSV();
+        res.json({
+            success: true,
+            message: `Exported data for ${result.count} stations.`,
+            directory: result.directory
+        });
+    } catch (error) {
+        console.error('Error exporting CSV:', error);
+        res.status(500).json({ success: false, error: 'Failed to export CSV files' });
+    }
+});
+
+// 10. Manual Sync Route
+app.post('/api/sync/provider', protect(['Admin', 'Data Manager']), async (req, res) => {
+    try {
+        const { provider, startDate, endDate } = req.body;
+        
+        if (!provider || !startDate || !endDate) {
+            return res.status(400).json({ success: false, message: 'Please provide provider name, startDate and endDate' });
+        }
+
+        console.log(`Manual sync requested for ${provider} from ${startDate} to ${endDate}`);
+        
+        // Run in background so request doesn't timeout
+        syncProviderData(provider, startDate, endDate)
+            .then(() => console.log(`Manual sync completed for ${provider}`))
+            .catch(err => console.error(`Manual sync failed for ${provider}:`, err));
+
+        res.json({
+            success: true,
+            message: `Synchronization started for ${provider}. It will continue in the background.`
+        });
+    } catch (error) {
+        console.error('Manual sync error:', error);
+        res.status(500).json({ success: false, error: 'Failed to start manual synchronization' });
+    }
+});
+
+// 11. Authentication Routes
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        
+        if (!username || !password) {
+            return res.status(400).json({ success: false, message: 'Please provide username and password' });
+        }
+
+        const result = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+        const user = result.rows[0];
+
+        if (!user || !(await comparePassword(password, user.password))) {
+            return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+
+        const token = generateToken(user);
+
+        res.json({
+            success: true,
+            token,
+            user: {
+                id: user.id,
+                username: user.username,
+                name: user.name,
+                role: user.role
+            }
+        });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+});
+
+app.get('/api/auth/me', protect(), (req, res) => {
+    res.json({
+        success: true,
+        user: req.user
+    });
+});
+
+// 11. Health check and monitoring
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        status: 'online',
+        uptime: Math.floor((new Date() - systemStatus.uptime) / 1000), // seconds
+        lastSync: {
+            time: systemStatus.lastSyncAt,
+            status: systemStatus.lastSyncStatus
+        },
+        lastExport: {
+            time: systemStatus.lastExportAt,
+            status: systemStatus.lastExportStatus
+        }
+    });
+});
 
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
@@ -249,11 +361,36 @@ app.listen(port, () => {
 
     // Initial sync
     console.log('Running initial data sync...');
-    syncData();
+    const runSync = async () => {
+        try {
+            await syncData();
+            systemStatus.lastSyncAt = new Date();
+            systemStatus.lastSyncStatus = 'success';
+        } catch (err) {
+            systemStatus.lastSyncStatus = 'failed: ' + err.message;
+        }
+    };
+    runSync();
 
     // Periodic sync every 15 minutes
-    setInterval(() => {
-        console.log('Running periodic data sync...');
-        syncData();
-    }, 15 * 60 * 1000);
+    setInterval(runSync, 15 * 60 * 1000);
+
+    // Initial and Periodic CSV export
+    const runExport = async () => {
+        try {
+            await exportAllStationsToCSV();
+            systemStatus.lastExportAt = new Date();
+            systemStatus.lastExportStatus = 'success';
+        } catch (err) {
+            systemStatus.lastExportStatus = 'failed: ' + err.message;
+        }
+    };
+
+    // Periodic CSV export every 15 minutes (offset by 5 mins)
+    setTimeout(() => {
+        console.log('Starting periodic CSV export...');
+        runExport();
+        
+        setInterval(runExport, 15 * 60 * 1000);
+    }, 5 * 60 * 1000);
 });
