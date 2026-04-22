@@ -32,10 +32,17 @@ async function exportAllStationsToCSV() {
             // Use station_name for filename if station_id is not very descriptive, 
             // but station_id is safer for uniqueness.
             const safeName = (station_name || station_id).replace(/[^a-z0-9]/gi, '_');
-            const fileName = `${safeName}.csv`;
-            const filePath = path.join(exportsDir, fileName);
+            const stationDir = path.join(exportsDir, safeName);
+            
+            // Create station directory if it doesn't exist
+            if (!fs.existsSync(stationDir)) {
+                fs.mkdirSync(stationDir, { recursive: true });
+            }
 
-            console.log(`Exporting readings for station: ${station_id} (${station_name}) -> ${fileName}`);
+            const fileName = `${safeName}.csv`;
+            const filePath = path.join(stationDir, fileName);
+
+            console.log(`Exporting readings for station: ${station_id} (${station_name}) -> ${safeName}/${fileName}`);
 
             // 2. Fetch all readings for this station
             const readingsResult = await db.query(
