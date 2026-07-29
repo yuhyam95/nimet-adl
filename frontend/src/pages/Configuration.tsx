@@ -6,13 +6,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 import MappingManager from '../components/MappingManager';
 import styles from './Configuration.module.css';
 
-interface ProviderConfig {
-    name: string;
-    baseUrl: string;
-    email?: string;
-    apiKey?: string;
-    isActive: boolean;
-}
+
 
 const Configuration = () => {
     const [editing, setEditing] = React.useState<string | null>(null);
@@ -56,14 +50,23 @@ const Configuration = () => {
 
     const handleEdit = (provider: any) => {
         setEditing(provider.name);
-        const currentUsername = provider.username || provider.apiKey || '';
-        setFormData({
-            baseUrl: provider.baseUrl,
-            email: provider.email || '',
-            apiKey: currentUsername.includes('**') ? '' : currentUsername,
-            password: '',
-            apiSecret: ''
-        });
+        if (provider.name === 'WAGTECH') {
+            setFormData({
+                ftpHost: provider.ftpHost || '',
+                ftpPort: provider.ftpPort || '21',
+                ftpUser: provider.ftpUser || '',
+                ftpPassword: ''
+            });
+        } else {
+            const currentUsername = provider.username || provider.apiKey || '';
+            setFormData({
+                baseUrl: provider.baseUrl || '',
+                email: provider.email || '',
+                apiKey: currentUsername.includes('**') ? '' : currentUsername,
+                password: '',
+                apiSecret: ''
+            });
+        }
     };
 
     const handleSave = async (providerName: string) => {
@@ -208,21 +211,23 @@ const Configuration = () => {
                                 <div className={styles.cardBody}>
                                     {editing === provider.name ? (
                                         <div className={styles.editForm}>
-                                            <div className={styles.formGroup}>
-                                                <label>Base URL</label>
-                                                <input 
-                                                    type="text" 
-                                                    value={formData.baseUrl} 
-                                                    onChange={e => setFormData({...formData, baseUrl: e.target.value})}
-                                                />
-                                            </div>
+                                            {provider.name !== 'WAGTECH' && (
+                                                <div className={styles.formGroup}>
+                                                    <label>Base URL</label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={formData.baseUrl || ''} 
+                                                        onChange={e => setFormData({...formData, baseUrl: e.target.value})}
+                                                    />
+                                                </div>
+                                            )}
                                             {provider.name === 'CLIMDES' ? (
                                                 <>
                                                     <div className={styles.formGroup}>
                                                         <label>Account Email</label>
                                                         <input 
                                                             type="email" 
-                                                            value={formData.email} 
+                                                            value={formData.email || ''} 
                                                             onChange={e => setFormData({...formData, email: e.target.value})}
                                                         />
                                                     </div>
@@ -231,8 +236,47 @@ const Configuration = () => {
                                                         <input 
                                                             type="password" 
                                                             placeholder="Enter new password"
-                                                            value={formData.password} 
+                                                            value={formData.password || ''} 
                                                             onChange={e => setFormData({...formData, password: e.target.value})}
+                                                        />
+                                                    </div>
+                                                </>
+                                            ) : provider.name === 'WAGTECH' ? (
+                                                <>
+                                                    <div className={styles.formGroup}>
+                                                        <label>FTP Host</label>
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="e.g. ftp.example.com"
+                                                            value={formData.ftpHost || ''} 
+                                                            onChange={e => setFormData({...formData, ftpHost: e.target.value})}
+                                                        />
+                                                    </div>
+                                                    <div className={styles.formGroup}>
+                                                        <label>FTP Port</label>
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="21"
+                                                            value={formData.ftpPort || ''} 
+                                                            onChange={e => setFormData({...formData, ftpPort: e.target.value})}
+                                                        />
+                                                    </div>
+                                                    <div className={styles.formGroup}>
+                                                        <label>FTP Username</label>
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="Enter Username"
+                                                            value={formData.ftpUser || ''} 
+                                                            onChange={e => setFormData({...formData, ftpUser: e.target.value})}
+                                                        />
+                                                    </div>
+                                                    <div className={styles.formGroup}>
+                                                        <label>FTP Password</label>
+                                                        <input 
+                                                            type="password" 
+                                                            placeholder="Enter new FTP password"
+                                                            value={formData.ftpPassword || ''} 
+                                                            onChange={e => setFormData({...formData, ftpPassword: e.target.value})}
                                                         />
                                                     </div>
                                                 </>
@@ -243,7 +287,7 @@ const Configuration = () => {
                                                         <input 
                                                             type="text" 
                                                             placeholder="Enter TAHMO Username"
-                                                            value={formData.apiKey} 
+                                                            value={formData.apiKey || ''} 
                                                             onChange={e => setFormData({...formData, apiKey: e.target.value})}
                                                         />
                                                     </div>
@@ -252,7 +296,7 @@ const Configuration = () => {
                                                         <input 
                                                             type="password" 
                                                             placeholder="Enter TAHMO Password"
-                                                            value={formData.apiSecret} 
+                                                            value={formData.apiSecret || ''} 
                                                             onChange={e => setFormData({...formData, apiSecret: e.target.value})}
                                                         />
                                                     </div>
@@ -269,14 +313,31 @@ const Configuration = () => {
                                         </div>
                                     ) : (
                                         <>
-                                            <div className={styles.infoRow}>
-                                                <span className={styles.label}>Base URL</span>
-                                                <span className={styles.value}>{provider.baseUrl || 'None'}</span>
-                                            </div>
-                                            <div className={styles.infoRow}>
-                                                <span className={styles.label}>{provider.name === 'TAHMO' ? 'Username' : 'Account'}</span>
-                                                <span className={styles.value}>{provider.email || provider.username || provider.apiKey}</span>
-                                            </div>
+                                            {provider.name === 'WAGTECH' ? (
+                                                <>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>FTP Host</span>
+                                                        <span className={styles.value}>
+                                                            {provider.ftpHost ? `${provider.ftpHost}:${provider.ftpPort || '21'}` : 'None'}
+                                                        </span>
+                                                    </div>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>FTP Username</span>
+                                                        <span className={styles.value}>{provider.ftpUser || 'None'}</span>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>Base URL</span>
+                                                        <span className={styles.value}>{provider.baseUrl || 'None'}</span>
+                                                    </div>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>{provider.name === 'TAHMO' ? 'Username' : 'Account'}</span>
+                                                        <span className={styles.value}>{provider.email || provider.username || provider.apiKey}</span>
+                                                    </div>
+                                                </>
+                                            )}
                                         </>
                                     )}
 

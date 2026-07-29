@@ -142,3 +142,81 @@
     position: relative;
     z-index: 10;
 }
+
+/* Sync and Export Card Styles */
+.statsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+.statCard {
+    background: white;
+    padding: 24px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid var(--border);
+}
+
+.statCard h3 {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0;
+}
+
+.healthValue {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #111827;
+}
+
+.healthLabel {
+    font-size: 0.75rem;
+    color: #6b7280;
+    font-weight: 500;
+    margin: 0;
+}
+
+.frequencyBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 99px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.highFreq {
+    background-color: #d1fae5;
+    color: #065f46;
+}
+
+.mediumFreq {
+    background-color: #e0f2fe;
+    color: #0369a1;
+}
+
+.lowFreq {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.noFreq {
+    background-color: #f3f4f6;
+    color: #6b7280;
+}
+
+.freqSubtext {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    display: block;
+}

@@ -1,7 +1,7 @@
 import React from 'react';
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Database, Plus, Trash2, Save, X, Info } from 'lucide-react';
+import { Plus, Trash2, Save, X, Info } from 'lucide-react';
 import styles from './MappingManager.module.css';
 
 interface Mapping {

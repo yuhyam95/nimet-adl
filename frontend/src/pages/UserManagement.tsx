@@ -1,7 +1,7 @@
 import React from 'react';
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import { Users, UserPlus, Trash2, Shield, User, Clock, AlertCircle, CheckCircle } from 'lucide-react';
+import { Users, UserPlus, Trash2, Clock } from 'lucide-react';
 import styles from './UserManagement.module.css';
 
 const UserManagement = () => {
@@ -14,7 +14,7 @@ const UserManagement = () => {
     });
     const [saving, setSaving] = React.useState(false);
 
-    const { data: users = [], isLoading, isError, refetch } = useQuery({
+    const { data: users = [], isLoading, refetch } = useQuery({
         queryKey: ['users'],
         queryFn: async () => {
             const res = await axios.get('/api/users');

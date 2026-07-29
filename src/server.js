@@ -8,7 +8,7 @@ const { hashPassword, comparePassword, generateToken } = require('./utils/auth.j
 const { protect } = require('./middleware/auth.js');
 
 const app = express();
-const port = 3000; // You can change this port as needed
+const port = 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -75,10 +75,34 @@ app.get('/api/weather', protect(['Admin', 'Data Manager', 'Data Viewer']), async
 });
 
 // 2. Get active data loggers from local database
-// Retrieves distinct stations that have data recorded
+// Retrieves distinct stations that have data recorded along with reporting frequency stats
 app.get('/api/dataloggers', protect(['Admin', 'Data Manager', 'Data Viewer']), async (req, res) => {
     try {
         const query = `
+      WITH recent_readings AS (
+        SELECT 
+          station_id,
+          timestamp,
+          ROW_NUMBER() OVER (PARTITION BY station_id ORDER BY timestamp DESC) as rn
+        FROM weather_readings
+      ),
+      reading_stats AS (
+        SELECT 
+          station_id,
+          COUNT(*) as total_recent_readings,
+          EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / NULLIF(COUNT(*) - 1, 0) as avg_interval_seconds
+        FROM recent_readings
+        WHERE rn <= 30
+        GROUP BY station_id
+      ),
+      count_24h AS (
+        SELECT
+          station_id,
+          COUNT(*) as readings_count_24h
+        FROM weather_readings
+        WHERE timestamp >= NOW() - INTERVAL '24 hours'
+        GROUP BY station_id
+      )
       SELECT DISTINCT ON (s.station_id) 
         s.station_id, 
         s.station_name, 
@@ -113,22 +137,274 @@ app.get('/api/dataloggers', protect(['Admin', 'Data Manager', 'Data Viewer']), a
         s.organization,
         s.country,
         s.is_active,
-        s.provider
+        s.provider,
+        s.wigos_id,
+        s.wsi_series,
+        s.wsi_issuer,
+        s.wsi_issue_number,
+        s.wsi_local,
+        s.wmo_block_number,
+        s.wmo_station_number,
+        s.station_height_above_msl,
+        s.barometer_height_above_msl,
+        s.anemometer_height,
+        s.rain_sensor_height,
+        s.method_of_ground_state_measurement,
+        s.method_of_snow_depth_measurement,
+        s.time_period_of_wind,
+        s.share_to_wis2box,
+        s.last_wis2box_dispatch_at,
+        s.last_wis2box_dispatch_status,
+        s.last_wis2box_dispatch_error,
+        rs.avg_interval_seconds,
+        COALESCE(c24.readings_count_24h, 0) as readings_count_24h
       FROM stations s
       LEFT JOIN weather_readings wr ON s.station_id = wr.station_id
+      LEFT JOIN reading_stats rs ON s.station_id = rs.station_id
+      LEFT JOIN count_24h c24 ON s.station_id = c24.station_id
       ORDER BY s.station_id, wr.timestamp DESC;
     `;
 
         const result = await db.query(query);
 
+        const mappedData = result.rows.map(row => {
+            let freqMins = null;
+            let freqText = 'No recent data';
+
+            if (row.avg_interval_seconds !== null && row.avg_interval_seconds !== undefined) {
+                const sec = parseFloat(row.avg_interval_seconds);
+                if (!isNaN(sec) && sec > 0) {
+                    freqMins = Math.round(sec / 60);
+                    if (freqMins < 1) {
+                        freqText = '< 1 min';
+                    } else if (freqMins < 60) {
+                        freqText = `Every ${freqMins} mins`;
+                    } else if (freqMins < 1440) {
+                        const hrs = (freqMins / 60).toFixed(1).replace(/\.0$/, '');
+                        freqText = hrs === '1' ? 'Every 1 hr' : `Every ${hrs} hrs`;
+                    } else {
+                        const days = (freqMins / 1440).toFixed(1).replace(/\.0$/, '');
+                        freqText = days === '1' ? 'Every 1 day' : `Every ${days} days`;
+                    }
+                }
+            }
+
+            return {
+                ...row,
+                avg_interval_seconds: row.avg_interval_seconds ? parseFloat(row.avg_interval_seconds) : null,
+                readings_count_24h: parseInt(row.readings_count_24h || '0', 10),
+                reporting_frequency_minutes: freqMins,
+                reporting_frequency_text: freqText
+            };
+        });
+
         res.json({
             success: true,
-            count: result.rows.length,
-            data: result.rows
+            count: mappedData.length,
+            data: mappedData
         });
     } catch (error) {
         console.error('Error fetching data loggers:', error);
         res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// 2c. Add a single station manually
+app.post('/api/stations', protect(['Admin', 'Data Manager']), async (req, res) => {
+    try {
+        const {
+            station_id, station_name, latitude, longitude, model, location_type,
+            organization, country, provider, wigos_id, wsi_series, wsi_issuer,
+            wsi_issue_number, wsi_local, wmo_block_number, wmo_station_number,
+            station_height_above_msl, barometer_height_above_msl, anemometer_height,
+            rain_sensor_height, method_of_ground_state_measurement, method_of_snow_depth_measurement,
+            time_period_of_wind
+        } = req.body;
+
+        if (!station_id) {
+            return res.status(400).json({ error: 'station_id is required' });
+        }
+
+        const query = `
+            INSERT INTO stations (
+                station_id, station_name, latitude, longitude, model, location_type,
+                organization, country, provider, wigos_id, wsi_series, wsi_issuer,
+                wsi_issue_number, wsi_local, wmo_block_number, wmo_station_number,
+                station_height_above_msl, barometer_height_above_msl, anemometer_height,
+                rain_sensor_height, method_of_ground_state_measurement, method_of_snow_depth_measurement,
+                time_period_of_wind, is_active
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                $17, $18, $19, $20, $21, $22, $23, true
+            ) ON CONFLICT (station_id) DO UPDATE SET
+                station_name = EXCLUDED.station_name,
+                latitude = EXCLUDED.latitude,
+                longitude = EXCLUDED.longitude,
+                model = EXCLUDED.model,
+                location_type = EXCLUDED.location_type,
+                organization = EXCLUDED.organization,
+                country = EXCLUDED.country,
+                provider = EXCLUDED.provider,
+                wigos_id = EXCLUDED.wigos_id,
+                wsi_series = EXCLUDED.wsi_series,
+                wsi_issuer = EXCLUDED.wsi_issuer,
+                wsi_issue_number = EXCLUDED.wsi_issue_number,
+                wsi_local = EXCLUDED.wsi_local,
+                wmo_block_number = EXCLUDED.wmo_block_number,
+                wmo_station_number = EXCLUDED.wmo_station_number,
+                station_height_above_msl = EXCLUDED.station_height_above_msl,
+                barometer_height_above_msl = EXCLUDED.barometer_height_above_msl,
+                anemometer_height = EXCLUDED.anemometer_height,
+                rain_sensor_height = EXCLUDED.rain_sensor_height,
+                method_of_ground_state_measurement = EXCLUDED.method_of_ground_state_measurement,
+                method_of_snow_depth_measurement = EXCLUDED.method_of_snow_depth_measurement,
+                time_period_of_wind = EXCLUDED.time_period_of_wind,
+                updated_at = NOW()
+            RETURNING *;
+        `;
+        const params = [
+            station_id, station_name, latitude, longitude, model, location_type,
+            organization, country, provider || 'MANUAL', wigos_id, wsi_series, wsi_issuer,
+            wsi_issue_number, wsi_local, wmo_block_number, wmo_station_number,
+            station_height_above_msl, barometer_height_above_msl, anemometer_height,
+            rain_sensor_height, method_of_ground_state_measurement, method_of_snow_depth_measurement,
+            time_period_of_wind
+        ];
+
+        const result = await db.query(query, params);
+        res.status(201).json({ success: true, data: result.rows[0] });
+    } catch (error) {
+        console.error('Error adding station:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// 2d. Add multiple stations (bulk import)
+app.post('/api/stations/bulk', protect(['Admin', 'Data Manager']), async (req, res) => {
+    try {
+        const { stations } = req.body;
+        if (!stations || !Array.isArray(stations) || stations.length === 0) {
+            return res.status(400).json({ error: 'An array of stations is required' });
+        }
+
+        const client = await db.pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const results = [];
+            for (const s of stations) {
+                if (!s.station_id) continue;
+
+                const query = `
+                    INSERT INTO stations (
+                        station_id, station_name, latitude, longitude, model, location_type,
+                        organization, country, provider, wigos_id, wsi_series, wsi_issuer,
+                        wsi_issue_number, wsi_local, wmo_block_number, wmo_station_number,
+                        station_height_above_msl, barometer_height_above_msl, anemometer_height,
+                        rain_sensor_height, method_of_ground_state_measurement, method_of_snow_depth_measurement,
+                        time_period_of_wind, is_active
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                        $17, $18, $19, $20, $21, $22, $23, $24
+                    ) ON CONFLICT (station_id) DO UPDATE SET
+                        station_name = EXCLUDED.station_name,
+                        latitude = EXCLUDED.latitude,
+                        longitude = EXCLUDED.longitude,
+                        model = EXCLUDED.model,
+                        location_type = EXCLUDED.location_type,
+                        organization = EXCLUDED.organization,
+                        country = EXCLUDED.country,
+                        provider = EXCLUDED.provider,
+                        wigos_id = EXCLUDED.wigos_id,
+                        wsi_series = EXCLUDED.wsi_series,
+                        wsi_issuer = EXCLUDED.wsi_issuer,
+                        wsi_issue_number = EXCLUDED.wsi_issue_number,
+                        wsi_local = EXCLUDED.wsi_local,
+                        wmo_block_number = EXCLUDED.wmo_block_number,
+                        wmo_station_number = EXCLUDED.wmo_station_number,
+                        station_height_above_msl = EXCLUDED.station_height_above_msl,
+                        barometer_height_above_msl = EXCLUDED.barometer_height_above_msl,
+                        anemometer_height = EXCLUDED.anemometer_height,
+                        rain_sensor_height = EXCLUDED.rain_sensor_height,
+                        method_of_ground_state_measurement = EXCLUDED.method_of_ground_state_measurement,
+                        method_of_snow_depth_measurement = EXCLUDED.method_of_snow_depth_measurement,
+                        time_period_of_wind = EXCLUDED.time_period_of_wind,
+                        is_active = EXCLUDED.is_active,
+                        updated_at = NOW()
+                    RETURNING *;
+                `;
+
+                const isActive = s.status === 'inactive' ? false : (s.status === 'active' ? true : (s.is_active !== undefined ? String(s.is_active).toLowerCase() === 'true' : true));
+
+                const params = [
+                    s.station_id, s.station_name, s.latitude, s.longitude, s.model, s.location_type,
+                    s.organization, s.country, s.provider || 'MANUAL', s.wigos_id, s.wsi_series, s.wsi_issuer,
+                    s.wsi_issue_number, s.wsi_local, s.wmo_block_number, s.wmo_station_number,
+                    s.station_height_above_msl, s.barometer_height_above_msl, s.anemometer_height,
+                    s.rain_sensor_height, s.method_of_ground_state_measurement, s.method_of_snow_depth_measurement,
+                    s.time_period_of_wind, isActive
+                ];
+
+                const result = await client.query(query, params);
+                results.push(result.rows[0]);
+            }
+
+            await client.query('COMMIT');
+            res.status(201).json({ success: true, count: results.length, data: results });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    } catch (error) {
+        console.error('Error in bulk importing stations:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// 2b. Update WIGOS metadata for a station
+app.patch('/api/stations/:stationId/wigos', protect(['Admin', 'Data Manager']), async (req, res) => {
+    try {
+        const { stationId } = req.params;
+        const {
+            wigos_id, wsi_series, wsi_issuer, wsi_issue_number, wsi_local,
+            wmo_block_number, wmo_station_number, station_height_above_msl,
+            barometer_height_above_msl, anemometer_height, rain_sensor_height,
+            method_of_ground_state_measurement, method_of_snow_depth_measurement,
+            time_period_of_wind, share_to_wis2box
+        } = req.body;
+
+        const updateQuery = `
+            UPDATE stations
+            SET wigos_id = $1, wsi_series = $2, wsi_issuer = $3, wsi_issue_number = $4,
+                wsi_local = $5, wmo_block_number = $6, wmo_station_number = $7,
+                station_height_above_msl = $8, barometer_height_above_msl = $9,
+                anemometer_height = $10, rain_sensor_height = $11,
+                method_of_ground_state_measurement = $12, method_of_snow_depth_measurement = $13,
+                time_period_of_wind = $14, share_to_wis2box = $15, updated_at = NOW()
+            WHERE station_id = $16
+            RETURNING *;
+        `;
+
+        const params = [
+            wigos_id, wsi_series, wsi_issuer, wsi_issue_number, wsi_local,
+            wmo_block_number, wmo_station_number, station_height_above_msl,
+            barometer_height_above_msl, anemometer_height, rain_sensor_height,
+            method_of_ground_state_measurement, method_of_snow_depth_measurement,
+            time_period_of_wind, share_to_wis2box, stationId
+        ];
+
+        const result = await db.query(updateQuery, params);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Station not found' });
+        }
+
+        res.json({ success: true, data: result.rows[0], message: 'WIGOS metadata updated successfully' });
+    } catch (error) {
+        console.error('Error updating WIGOS metadata:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
     }
 });
 
@@ -166,6 +442,14 @@ app.get('/api/config', protect(['Admin', 'Data Manager']), (req, res) => {
                     username: config.tahmo.apiKey ? '********' + config.tahmo.apiKey.slice(-4) : null,
                     password: config.tahmo.apiSecret ? '********' : null,
                     isActive: !!config.tahmo.apiKey && !!config.tahmo.apiSecret
+                },
+                {
+                    name: 'WAGTECH',
+                    ftpHost: config.wagtech.ftpHost,
+                    ftpPort: config.wagtech.ftpPort,
+                    ftpUser: config.wagtech.ftpUser,
+                    ftpPassword: config.wagtech.ftpPassword ? '********' : null,
+                    isActive: !!config.wagtech.ftpHost && !!config.wagtech.ftpUser && !!config.wagtech.ftpPassword
                 }
             ],
             exportPath: config.exportPath
@@ -176,7 +460,7 @@ app.get('/api/config', protect(['Admin', 'Data Manager']), (req, res) => {
 // 5. Update configuration
 app.post('/api/config', protect(['Admin']), (req, res) => {
     const { provider, credentials, system } = req.body;
-    
+
     if (!provider && !credentials && !system) {
         return res.status(400).json({ success: false, message: 'Missing configuration update details' });
     }
@@ -190,12 +474,17 @@ app.post('/api/config', protect(['Admin']), (req, res) => {
         if (credentials.apiKey) updates.TAHMO_API_KEY = credentials.apiKey;
         if (credentials.apiSecret) updates.TAHMO_API_SECRET = credentials.apiSecret;
         if (credentials.baseUrl) updates.TAHMO_API_BASE_URL = credentials.baseUrl;
+    } else if (provider === 'WAGTECH' && credentials) {
+        if (credentials.ftpHost) updates.WAGTECH_FTP_HOST = credentials.ftpHost;
+        if (credentials.ftpPort) updates.WAGTECH_FTP_PORT = credentials.ftpPort;
+        if (credentials.ftpUser) updates.WAGTECH_FTP_USER = credentials.ftpUser;
+        if (credentials.ftpPassword) updates.WAGTECH_FTP_PASSWORD = credentials.ftpPassword;
     } else if (system) {
         if (system.exportPath) updates.EXPORT_PATH = system.exportPath;
     }
 
     const success = configManager.updateEnv(updates);
-    
+
     if (success) {
         res.json({ success: true, message: 'Configuration updated successfully. Note: some changes might require a server restart.' });
     } else {
@@ -222,7 +511,7 @@ app.get('/api/mappings/:provider', protect(['Admin', 'Data Manager']), async (re
 app.post('/api/mappings', protect(['Admin', 'Data Manager']), async (req, res) => {
     try {
         const { provider, external_key, internal_field, conversion_formula } = req.body;
-        
+
         if (!provider || !external_key || !internal_field) {
             return res.status(400).json({ success: false, message: 'Missing required fields' });
         }
@@ -270,17 +559,58 @@ app.post('/api/export/csv', protect(['Admin', 'Data Manager']), async (req, res)
     }
 });
 
+// 9b. Upload specific station CSV to wis2box
+app.post('/api/export/wis2box', protect(['Admin', 'Data Manager']), async (req, res) => {
+    try {
+        const { stationId } = req.body;
+        if (!stationId) {
+            return res.status(400).json({ success: false, message: 'stationId is required' });
+        }
+
+        const result = await db.query('SELECT station_name FROM weather_readings WHERE station_id = $1 LIMIT 1', [stationId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Station not found or has no readings' });
+        }
+
+        const stationName = result.rows[0].station_name;
+        const safeName = (stationName || stationId).replace(/[^a-z0-9]/gi, '_');
+        const fileName = `${safeName}.csv`;
+
+        const path = require('path');
+        const fs = require('fs');
+        const config = require('./config/index.js');
+        const filePath = path.join(config.exportPath, safeName, fileName);
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ success: false, message: `Export file not found. Please run CSV export first.` });
+        }
+
+        const { uploadToWis2box } = require('./services/wis2box.js');
+        await uploadToWis2box(filePath, fileName);
+
+        await db.query(`UPDATE stations SET last_wis2box_dispatch_at = NOW(), last_wis2box_dispatch_status = 'Success', last_wis2box_dispatch_error = NULL WHERE station_id = $1`, [stationId]);
+
+        res.json({ success: true, message: `Successfully uploaded ${fileName} to wis2box.` });
+    } catch (error) {
+        console.error('wis2box upload error:', error);
+        if (req.body.stationId) {
+            await db.query(`UPDATE stations SET last_wis2box_dispatch_at = NOW(), last_wis2box_dispatch_status = 'Failed', last_wis2box_dispatch_error = $1 WHERE station_id = $2`, [error.message || 'Unknown error', req.body.stationId]).catch(() => { });
+        }
+        res.status(500).json({ success: false, message: error.message || 'Failed to upload to wis2box' });
+    }
+});
+
 // 10. Manual Sync Route
 app.post('/api/sync/provider', protect(['Admin', 'Data Manager']), async (req, res) => {
     try {
         const { provider, startDate, endDate } = req.body;
-        
+
         if (!provider || !startDate || !endDate) {
             return res.status(400).json({ success: false, message: 'Please provide provider name, startDate and endDate' });
         }
 
         console.log(`Manual sync requested for ${provider} from ${startDate} to ${endDate}`);
-        
+
         // Run in background so request doesn't timeout
         syncProviderData(provider, startDate, endDate)
             .then(() => console.log(`Manual sync completed for ${provider}`))
@@ -300,7 +630,7 @@ app.post('/api/sync/provider', protect(['Admin', 'Data Manager']), async (req, r
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        
+
         if (!username || !password) {
             return res.status(400).json({ success: false, message: 'Please provide username and password' });
         }
@@ -351,7 +681,7 @@ app.get('/api/users', protect(['Admin']), async (req, res) => {
 app.post('/api/users', protect(['Admin']), async (req, res) => {
     try {
         const { username, name, role, password } = req.body;
-        
+
         if (!username || !password || !role) {
             return res.status(400).json({ success: false, message: 'Username, password and role are required' });
         }
@@ -375,7 +705,7 @@ app.post('/api/users', protect(['Admin']), async (req, res) => {
 app.delete('/api/users/:id', protect(['Admin']), async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         if (parseInt(id) === req.user.id) {
             return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
         }
@@ -406,7 +736,7 @@ app.patch('/api/users/:id/role', protect(['Admin']), async (req, res) => {
 app.post('/api/auth/change-password', protect(), async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
-        
+
         const result = await db.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
         const user = result.rows[0];
 
@@ -477,7 +807,7 @@ app.listen(port, () => {
     setTimeout(() => {
         console.log('Starting periodic CSV export...');
         runExport();
-        
+
         setInterval(runExport, 15 * 60 * 1000);
     }, 5 * 60 * 1000);
 });

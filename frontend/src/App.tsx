@@ -7,9 +7,11 @@ import Dashboard from './pages/Dashboard';
 import Stations from './pages/Stations';
 import StationDetails from './pages/StationDetails';
 import Configuration from './pages/Configuration';
+import Wis2box from './pages/Wis2box';
 import UserManagement from './pages/UserManagement';
 import Profile from './pages/Profile';
 import Login from './pages/Login';
+import AddStation from './pages/AddStation';
 import './styles/global.css';
 
 const queryClient = new QueryClient({
@@ -28,19 +30,25 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
-            
+
             <Route path="/" element={
               <ProtectedRoute>
                 <MainLayout><Dashboard /></MainLayout>
               </ProtectedRoute>
             } />
-            
+
             <Route path="/stations" element={
               <ProtectedRoute>
                 <MainLayout><Stations /></MainLayout>
               </ProtectedRoute>
             } />
-            
+
+            <Route path="/stations/add" element={
+              <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
+                <MainLayout><AddStation /></MainLayout>
+              </ProtectedRoute>
+            } />
+
             <Route path="/stations/:id" element={
               <ProtectedRoute>
                 <MainLayout><StationDetails /></MainLayout>
@@ -50,6 +58,12 @@ function App() {
             <Route path="/configuration" element={
               <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
                 <MainLayout><Configuration /></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/wis2box" element={
+              <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
+                <MainLayout><Wis2box /></MainLayout>
               </ProtectedRoute>
             } />
 

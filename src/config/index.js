@@ -29,7 +29,25 @@ module.exports = {
       apiSecret: process.env.TAHMO_API_SECRET
     };
   },
+  get wagtech() {
+    return {
+      ftpHost: process.env.WAGTECH_FTP_HOST,
+      ftpPort: process.env.WAGTECH_FTP_PORT || '21',
+      ftpUser: process.env.WAGTECH_FTP_USER,
+      ftpPassword: process.env.WAGTECH_FTP_PASSWORD
+    };
+  },
   get exportPath() {
     return process.env.EXPORT_PATH || path.join(process.cwd(), 'exports');
+  },
+  get wis2box() {
+    return {
+      endpoint: process.env.WIS2BOX_MINIO_ENDPOINT,
+      port: process.env.WIS2BOX_MINIO_PORT ? parseInt(process.env.WIS2BOX_MINIO_PORT, 10) : undefined,
+      useSSL: process.env.WIS2BOX_MINIO_USE_SSL === 'true',
+      accessKey: process.env.WIS2BOX_MINIO_ACCESS_KEY,
+      secretKey: process.env.WIS2BOX_MINIO_SECRET_KEY,
+      bucket: process.env.WIS2BOX_MINIO_BUCKET || 'wis2box-incoming'
+    };
   }
 };

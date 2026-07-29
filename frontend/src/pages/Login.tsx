@@ -2,8 +2,9 @@ import React from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, User, Lock, AlertCircle } from 'lucide-react';
+import { User, Lock, AlertCircle } from 'lucide-react';
 import styles from './Login.module.css';
+import nimetLogo from '../assets/nimet-logo.png';
 
 const Login = () => {
     const [username, setUsername] = React.useState('');
@@ -37,7 +38,7 @@ const Login = () => {
             <div className={styles.loginCard}>
                 <div className={styles.header}>
                     <div className={styles.logo}>
-                        <LogIn size={32} />
+                        <img src={nimetLogo} alt="NiMet Logo" />
                     </div>
                     <h1>NiMet ADL</h1>
                     <p>Automated Data Loader System</p>

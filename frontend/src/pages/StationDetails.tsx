@@ -14,7 +14,7 @@ import {
     Legend,
     ResponsiveContainer
 } from 'recharts';
-import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Thermometer, Droplets, Wind, Compass, CloudRain } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, RefreshCw, Thermometer, Droplets, Wind, Compass, CloudRain, Globe, Radio, Activity, Database, ShieldCheck, CheckCircle2, XCircle, Award } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -74,6 +74,25 @@ interface Station {
     last_reading_at: string;
     is_active: boolean;
     provider: string;
+    wigos_id?: string;
+    wsi_series?: string;
+    wsi_issuer?: string;
+    wsi_issue_number?: string;
+    wsi_local?: string;
+    wmo_block_number?: string;
+    wmo_station_number?: string;
+    station_height_above_msl?: number;
+    barometer_height_above_msl?: number;
+    anemometer_height?: number;
+    rain_sensor_height?: number;
+    method_of_ground_state_measurement?: string;
+    method_of_snow_depth_measurement?: string;
+    time_period_of_wind?: number;
+    share_to_wis2box?: boolean;
+    avg_interval_seconds?: number | null;
+    readings_count_24h?: number;
+    reporting_frequency_minutes?: number | null;
+    reporting_frequency_text?: string;
 }
 
 const StationDetails = () => {
@@ -82,6 +101,36 @@ const StationDetails = () => {
     const [isFiltered, setIsFiltered] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
+
+    // WIGOS Form State
+    const [isEditingWigos, setIsEditingWigos] = useState(false);
+    const [wigosForm, setWigosForm] = useState<Partial<Station>>({});
+    const [savingWigos, setSavingWigos] = useState(false);
+    const [wigosError, setWigosError] = useState<string | null>(null);
+
+    const handleWigosSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        
+        if (wigosForm.share_to_wis2box && (!wigosForm.wigos_id || wigosForm.wigos_id.trim() === '')) {
+            setWigosError('WIGOS ID is required to share data to WIS2BOX.');
+            return;
+        }
+
+        setSavingWigos(true);
+        setWigosError(null);
+        try {
+            const token = localStorage.getItem('token');
+            await axios.patch(`/api/stations/${id}/wigos`, wigosForm, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            await refetchStations();
+            setIsEditingWigos(false);
+        } catch (err: any) {
+            setWigosError(err.response?.data?.message || err.message || 'Failed to save WIGOS metadata');
+        } finally {
+            setSavingWigos(false);
+        }
+    };
 
     // 1. Fetch Station Metadata
     const {
@@ -145,6 +194,87 @@ const StationDetails = () => {
             maxWindSpeed: maxWind
         };
     }, [rawReadings]);
+
+    // Evaluate WMO GBON Compliance Criteria
+    const gbonEvaluation = useMemo(() => {
+        if (!station) return null;
+
+        const hasWigos = !!station.wigos_id && station.wigos_id.trim().length > 0;
+        const isWis2Enabled = !!station.share_to_wis2box;
+        const isWis2Success = station.last_wis2box_dispatch_status === 'Success';
+        const mins = station.reporting_frequency_minutes;
+        const isHighFreq = mins !== null && mins !== undefined && mins <= 60; // WMO GBON surface observing target <= 60m
+        const isOptimalFreq = mins !== null && mins !== undefined && mins <= 15;
+        const isTransmitting = station.last_reading_at ? (Date.now() - new Date(station.last_reading_at).getTime() <= 24 * 60 * 60 * 1000) : false;
+
+        const checks = [
+            {
+                id: 'wigos',
+                title: 'WIGOS Station Identifier (WSI)',
+                passed: hasWigos,
+                statusText: hasWigos ? station.wigos_id! : 'Not Assigned',
+                subtext: 'Mandatory WMO unique station identifier for global indexing',
+                tip: !hasWigos ? 'Assign a WIGOS ID in the WIGOS Metadata section below' : null
+            },
+            {
+                id: 'wis2_sharing',
+                title: 'WIS2box Dispatch Channel',
+                passed: isWis2Enabled,
+                statusText: isWis2Enabled ? 'Enabled' : 'Disabled',
+                subtext: 'Data routing to local/global WIS2box ingestion endpoint',
+                tip: !isWis2Enabled ? 'Enable "Share to WIS2BOX" in the WIGOS settings below' : null
+            },
+            {
+                id: 'wis2_status',
+                title: 'WIS2 Broadcast Status',
+                passed: isWis2Success,
+                statusText: station.last_wis2box_dispatch_status || 'Never Dispatched',
+                subtext: station.last_wis2box_dispatch_at ? `Last broadcast: ${new Date(station.last_wis2box_dispatch_at).toLocaleString()}` : 'No dispatch record',
+                tip: !isWis2Success ? (station.last_wis2box_dispatch_error || 'Verify MinIO / WIS2box endpoint connection') : null
+            },
+            {
+                id: 'frequency',
+                title: 'Observational Reporting Frequency',
+                passed: isHighFreq,
+                optimal: isOptimalFreq,
+                statusText: station.reporting_frequency_text || 'No recent data',
+                subtext: station.readings_count_24h ? `Target: ≤ 60m interval (${station.readings_count_24h} readings in 24h)` : 'Target: ≤ 60m interval',
+                tip: !isHighFreq ? 'GBON requires continuous surface observations at least hourly (≤ 60m)' : null
+            },
+            {
+                id: 'transmission',
+                title: '24-Hour Real-Time Transmission',
+                passed: isTransmitting,
+                statusText: isTransmitting ? 'Active Transmission' : 'Offline / Interrupted',
+                subtext: station.last_reading_at ? `Latest: ${new Date(station.last_reading_at).toLocaleString()}` : 'No readings received',
+                tip: !isTransmitting ? 'Check station datalogger power or cellular network connectivity' : null
+            }
+        ];
+
+        const passedCount = checks.filter(c => c.passed).length;
+        const totalCount = checks.length;
+        const scorePct = Math.round((passedCount / totalCount) * 100);
+
+        let overallStatus = 'Non-Compliant';
+        let badgeClass = styles.gbonBadgeNonCompliant;
+
+        if (scorePct === 100) {
+            overallStatus = 'GBON Compliant';
+            badgeClass = styles.gbonBadgeCompliant;
+        } else if (scorePct >= 60) {
+            overallStatus = 'Partially Compliant';
+            badgeClass = styles.gbonBadgePartial;
+        }
+
+        return {
+            checks,
+            passedCount,
+            totalCount,
+            scorePct,
+            overallStatus,
+            badgeClass
+        };
+    }, [station]);
 
     const handleFilter = () => {
         if (dateFilter.start && dateFilter.end) {
@@ -332,8 +462,9 @@ const StationDetails = () => {
 
     if (!station) return <div>Station not found</div>;
 
-    const lastUpdate = new Date(station.last_reading_at);
+    const lastUpdateDate = station.last_reading_at ? new Date(station.last_reading_at) : null;
     const isOnline = station.is_active;
+    const isTransmitting = lastUpdateDate ? (Date.now() - lastUpdateDate.getTime() <= 24 * 60 * 60 * 1000) : false;
 
     return (
         <div className={styles.container}>
@@ -357,7 +488,7 @@ const StationDetails = () => {
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <Clock size={16} />
-                            Last updated: {lastUpdate.toLocaleString()}
+                            Last updated: {lastUpdateDate ? lastUpdateDate.toLocaleString() : 'Never'}
                         </span>
                     </div>
                 </div>
@@ -370,7 +501,16 @@ const StationDetails = () => {
                             color: isOnline ? '#065f46' : '#374151'
                         }}
                     >
-                        {isOnline ? 'Active' : 'Inactive'}
+                        Functional: {isOnline ? 'Active' : 'Inactive'}
+                    </div>
+                    <div
+                        className={styles.statusBadge}
+                        style={{
+                            backgroundColor: isTransmitting ? '#d1fae5' : '#fee2e2',
+                            color: isTransmitting ? '#065f46' : '#991b1b'
+                        }}
+                    >
+                        Transmission: {isTransmitting ? 'Transmitting' : 'Offline'}
                     </div>
                 </div>
             </div>
@@ -454,6 +594,16 @@ const StationDetails = () => {
                                 <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Coordinates:</div>
                                 <div style={{ fontWeight: 500, color: '#111827' }}>{station.latitude}, {station.longitude}</div>
 
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Reporting Frequency:</div>
+                                <div style={{ fontWeight: 500, color: '#111827', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span>{station.reporting_frequency_text || 'No recent data'}</span>
+                                    {station.readings_count_24h !== undefined && station.readings_count_24h > 0 && (
+                                        <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                                            ({station.readings_count_24h} readings/24h)
+                                        </span>
+                                    )}
+                                </div>
+
                                 {station.country && (
                                     <>
                                         <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Country:</div>
@@ -481,6 +631,131 @@ const StationDetails = () => {
                             </MapContainer>
                         </div>
                     </div>
+                </div>
+
+                {/* WIGOS Settings Card */}
+                <div className={styles.chartCard} style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3>WIGOS & WIS2BOX Metadata</h3>
+                        {!isEditingWigos ? (
+                            <button 
+                                onClick={() => {
+                                    setWigosForm({
+                                        wigos_id: station.wigos_id || '',
+                                        wsi_series: station.wsi_series || '',
+                                        wsi_issuer: station.wsi_issuer || '',
+                                        wsi_issue_number: station.wsi_issue_number || '',
+                                        wsi_local: station.wsi_local || '',
+                                        wmo_block_number: station.wmo_block_number || '',
+                                        wmo_station_number: station.wmo_station_number || '',
+                                        station_height_above_msl: station.station_height_above_msl || '',
+                                        barometer_height_above_msl: station.barometer_height_above_msl || '',
+                                        anemometer_height: station.anemometer_height || '',
+                                        rain_sensor_height: station.rain_sensor_height || '',
+                                        method_of_ground_state_measurement: station.method_of_ground_state_measurement || '',
+                                        method_of_snow_depth_measurement: station.method_of_snow_depth_measurement || '',
+                                        time_period_of_wind: station.time_period_of_wind || '',
+                                        share_to_wis2box: station.share_to_wis2box || false
+                                    } as any);
+                                    setIsEditingWigos(true);
+                                }}
+                                style={{ padding: '6px 12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                            >
+                                Edit Metadata
+                            </button>
+                        ) : (
+                            <button 
+                                onClick={() => setIsEditingWigos(false)}
+                                style={{ padding: '6px 12px', background: '#e5e7eb', color: '#374151', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                            >
+                                Cancel
+                            </button>
+                        )}
+                    </div>
+                    
+                    {isEditingWigos ? (
+                        <form onSubmit={handleWigosSubmit} style={{ marginTop: '16px' }}>
+                            {wigosError && <div style={{ color: 'red', marginBottom: '12px' }}>{wigosError}</div>}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WIGOS ID (e.g. 0-288-0-12345)</label>
+                                    <input type="text" value={wigosForm.wigos_id || ''} onChange={(e) => {
+                                        const val = e.target.value;
+                                        setWigosForm({
+                                            ...wigosForm, 
+                                            wigos_id: val,
+                                            ...((!val || val.trim() === '') && { share_to_wis2box: false })
+                                        });
+                                    }} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WSI Series</label>
+                                    <input type="text" value={wigosForm.wsi_series || ''} onChange={(e) => setWigosForm({...wigosForm, wsi_series: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WSI Issuer</label>
+                                    <input type="text" value={wigosForm.wsi_issuer || ''} onChange={(e) => setWigosForm({...wigosForm, wsi_issuer: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WSI Issue Number</label>
+                                    <input type="text" value={wigosForm.wsi_issue_number || ''} onChange={(e) => setWigosForm({...wigosForm, wsi_issue_number: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WSI Local</label>
+                                    <input type="text" value={wigosForm.wsi_local || ''} onChange={(e) => setWigosForm({...wigosForm, wsi_local: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WMO Block Number</label>
+                                    <input type="text" value={wigosForm.wmo_block_number || ''} onChange={(e) => setWigosForm({...wigosForm, wmo_block_number: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>WMO Station Number</label>
+                                    <input type="text" value={wigosForm.wmo_station_number || ''} onChange={(e) => setWigosForm({...wigosForm, wmo_station_number: e.target.value})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>Station Height Above MSL</label>
+                                    <input type="number" step="0.1" value={wigosForm.station_height_above_msl || ''} onChange={(e) => setWigosForm({...wigosForm, station_height_above_msl: Number(e.target.value)})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>Barometer Height</label>
+                                    <input type="number" step="0.1" value={wigosForm.barometer_height_above_msl || ''} onChange={(e) => setWigosForm({...wigosForm, barometer_height_above_msl: Number(e.target.value)})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.85rem', color: '#4b5563', marginBottom: '4px' }}>Anemometer Height</label>
+                                    <input type="number" step="0.1" value={wigosForm.anemometer_height || ''} onChange={(e) => setWigosForm({...wigosForm, anemometer_height: Number(e.target.value)})} style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }} />
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', marginTop: '24px' }}>
+                                    <input 
+                                        type="checkbox" 
+                                        id="shareToWis2box" 
+                                        checked={wigosForm.share_to_wis2box || false} 
+                                        disabled={!wigosForm.wigos_id || wigosForm.wigos_id.trim() === ''}
+                                        onChange={(e) => setWigosForm({...wigosForm, share_to_wis2box: e.target.checked})} 
+                                        style={{ marginRight: '8px', transform: 'scale(1.2)' }} 
+                                    />
+                                    <label htmlFor="shareToWis2box" style={{ fontSize: '0.9rem', color: (!wigosForm.wigos_id || wigosForm.wigos_id.trim() === '') ? '#9ca3af' : '#111827', fontWeight: 500 }}>Share data to WIS2BOX</label>
+                                </div>
+                            </div>
+                            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                                <button type="submit" disabled={savingWigos} style={{ padding: '8px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                                    {savingWigos ? 'Saving...' : 'Save Metadata'}
+                                </button>
+                            </div>
+                        </form>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '16px' }}>
+                            <div><span style={{ color: '#6b7280', fontSize: '0.85rem' }}>WIGOS ID:</span><div style={{ fontWeight: 500 }}>{station.wigos_id || '-'}</div></div>
+                            <div><span style={{ color: '#6b7280', fontSize: '0.85rem' }}>WSI Series:</span><div style={{ fontWeight: 500 }}>{station.wsi_series || '-'}</div></div>
+                            <div><span style={{ color: '#6b7280', fontSize: '0.85rem' }}>WSI Issuer:</span><div style={{ fontWeight: 500 }}>{station.wsi_issuer || '-'}</div></div>
+                            <div><span style={{ color: '#6b7280', fontSize: '0.85rem' }}>WMO Station No:</span><div style={{ fontWeight: 500 }}>{station.wmo_station_number || '-'}</div></div>
+                            <div><span style={{ color: '#6b7280', fontSize: '0.85rem' }}>Station Elevation:</span><div style={{ fontWeight: 500 }}>{station.station_height_above_msl ? `${station.station_height_above_msl} m` : '-'}</div></div>
+                            <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
+                                <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '0.85rem', fontWeight: 600, background: station.share_to_wis2box ? '#d1fae5' : '#f3f4f6', color: station.share_to_wis2box ? '#065f46' : '#6b7280' }}>
+                                    {station.share_to_wis2box ? '✓ Sharing to WIS2BOX' : '✗ Not sharing to WIS2BOX'}
+                                </span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Temperature Chart */}
@@ -711,6 +986,87 @@ const StationDetails = () => {
                     </div>
                 </div>
             </div>
+
+            {/* WMO GBON Compliance & Reporting Tracker */}
+            {gbonEvaluation && (
+                <div className={styles.gbonCard} style={{ marginTop: '24px' }}>
+                    <div className={styles.gbonHeader}>
+                        <div className={styles.gbonHeaderTitle}>
+                            <Globe size={22} color="#0284c7" />
+                            <div>
+                                <h3>WMO GBON Compliance & Reporting Tracker</h3>
+                                <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                                    Global Basic Observing Network (GBON) Standards Evaluation
+                                </span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                            <div className={styles.gbonProgressContainer}>
+                                <div className={styles.gbonProgressBarTrack}>
+                                    <div
+                                        className={styles.gbonProgressBarFill}
+                                        style={{
+                                            width: `${gbonEvaluation.scorePct}%`,
+                                            backgroundColor: gbonEvaluation.scorePct === 100 ? '#10b981' : (gbonEvaluation.scorePct >= 60 ? '#f59e0b' : '#ef4444')
+                                        }}
+                                    />
+                                </div>
+                                <span className={styles.gbonProgressText}>
+                                    {gbonEvaluation.scorePct}% ({gbonEvaluation.passedCount}/{gbonEvaluation.totalCount})
+                                </span>
+                            </div>
+
+                            <div className={`${styles.gbonBadge} ${gbonEvaluation.badgeClass}`}>
+                                <Award size={16} />
+                                {gbonEvaluation.overallStatus}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className={styles.gbonGrid}>
+                        {gbonEvaluation.checks.map(c => {
+                            const itemClass = c.passed
+                                ? styles.gbonItemPass
+                                : (c.id === 'frequency' && station?.reporting_frequency_minutes && station.reporting_frequency_minutes <= 120 ? styles.gbonItemWarning : styles.gbonItemFail);
+
+                            return (
+                                <div key={c.id} className={`${styles.gbonItem} ${itemClass}`}>
+                                    <div className={styles.gbonItemHeader}>
+                                        <span className={styles.gbonItemLabel}>
+                                            {c.id === 'wigos' && <Database size={15} color="#2563eb" />}
+                                            {c.id === 'wis2_sharing' && <Radio size={15} color="#0284c7" />}
+                                            {c.id === 'wis2_status' && <ShieldCheck size={15} color="#059669" />}
+                                            {c.id === 'frequency' && <Activity size={15} color="#d97706" />}
+                                            {c.id === 'transmission' && <Clock size={15} color="#7c3aed" />}
+                                            {c.title}
+                                        </span>
+                                        {c.passed ? (
+                                            <CheckCircle2 size={18} color="#059669" />
+                                        ) : (
+                                            <XCircle size={18} color="#dc2626" />
+                                        )}
+                                    </div>
+
+                                    <div className={styles.gbonItemValue}>
+                                        {c.statusText}
+                                    </div>
+
+                                    <div className={styles.gbonItemSubtext}>
+                                        {c.subtext}
+                                    </div>
+
+                                    {c.tip && (
+                                        <div className={styles.gbonItemTip}>
+                                            💡 {c.tip}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

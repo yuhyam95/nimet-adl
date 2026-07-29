@@ -9,7 +9,7 @@ require('dotenv').config();
  */
 const syncData = async (shouldClosePool = false) => {
     try {
-        // Ensure stations table exists with provider column
+        // Ensure stations table exists with provider and WIGOS columns
         const createStationsTableQuery = `
             CREATE TABLE IF NOT EXISTS stations (
                 station_id VARCHAR(255) PRIMARY KEY,
@@ -23,14 +23,53 @@ const syncData = async (shouldClosePool = false) => {
                 last_reading_at TIMESTAMP,
                 is_active BOOLEAN DEFAULT FALSE,
                 provider VARCHAR(50) DEFAULT 'CLIMDES',
+                wigos_id VARCHAR(255),
+                wsi_series VARCHAR(255),
+                wsi_issuer VARCHAR(255),
+                wsi_issue_number VARCHAR(255),
+                wsi_local VARCHAR(255),
+                wmo_block_number VARCHAR(255),
+                wmo_station_number VARCHAR(255),
+                station_height_above_msl NUMERIC,
+                barometer_height_above_msl NUMERIC,
+                anemometer_height NUMERIC,
+                rain_sensor_height NUMERIC,
+                method_of_ground_state_measurement VARCHAR(255),
+                method_of_snow_depth_measurement VARCHAR(255),
+                time_period_of_wind NUMERIC,
+                share_to_wis2box BOOLEAN DEFAULT FALSE,
+                last_wis2box_dispatch_at TIMESTAMP,
+                last_wis2box_dispatch_status VARCHAR(50),
+                last_wis2box_dispatch_error TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `;
         await db.query(createStationsTableQuery);
 
-        // Migration: Add provider column if it doesn't exist
+        // Migration: Add provider and WIGOS columns if they don't exist
         try {
-            await db.query(`ALTER TABLE stations ADD COLUMN IF NOT EXISTS provider VARCHAR(50) DEFAULT 'CLIMDES';`);
+            await db.query(`
+                ALTER TABLE stations 
+                ADD COLUMN IF NOT EXISTS provider VARCHAR(50) DEFAULT 'CLIMDES',
+                ADD COLUMN IF NOT EXISTS wigos_id VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS wsi_series VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS wsi_issuer VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS wsi_issue_number VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS wsi_local VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS wmo_block_number VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS wmo_station_number VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS station_height_above_msl NUMERIC,
+                ADD COLUMN IF NOT EXISTS barometer_height_above_msl NUMERIC,
+                ADD COLUMN IF NOT EXISTS anemometer_height NUMERIC,
+                ADD COLUMN IF NOT EXISTS rain_sensor_height NUMERIC,
+                ADD COLUMN IF NOT EXISTS method_of_ground_state_measurement VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS method_of_snow_depth_measurement VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS time_period_of_wind NUMERIC,
+                ADD COLUMN IF NOT EXISTS share_to_wis2box BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_status VARCHAR(50),
+                ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_error TEXT;
+            `);
         } catch (err) { /* ignore */ }
 
         const providers = ['CLIMDES', 'TAHMO'];
@@ -190,6 +229,23 @@ const syncProviderData = async (providerName, startDate, endDate) => {
                                 console.error(`Insert error for ${logger._id}: ${e.message}`);
                             }
                         });
+                    }
+                }
+                
+                // Dispatch newly fetched data to WIS2BOX
+                const fullStationRes = await db.query('SELECT * FROM stations WHERE station_id = $1', [logger._id]);
+                if (fullStationRes.rows.length > 0) {
+                    const fullStation = fullStationRes.rows[0];
+                    if (fullStation.wigos_id && fullStation.share_to_wis2box) {
+                        const endDateTime = endDate.includes('T') ? endDate : endDate + 'T23:59:59';
+                        const dbReadingsResult = await db.query(
+                            'SELECT * FROM weather_readings WHERE station_id = $1 AND timestamp >= $2 AND timestamp <= $3',
+                            [logger._id, startDate, new Date(endDateTime).toISOString()]
+                        );
+                        if (dbReadingsResult.rows.length > 0) {
+                            const { dispatchToWis2box } = require('./services/wis2box.js');
+                            await dispatchToWis2box(fullStation, dbReadingsResult.rows);
+                        }
                     }
                 }
             } catch (err) {

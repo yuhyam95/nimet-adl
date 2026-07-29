@@ -24,6 +24,7 @@ export const Sidebar = () => {
         { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
         { icon: <MapPin size={20} />, label: 'Stations', path: '/stations' },
         ...(canManageData ? [
+            { icon: <Radio size={20} />, label: 'Wis2box', path: '/wis2box' },
             { icon: <Settings size={20} />, label: 'Configuration', path: '/configuration' }
         ] : []),
         ...(isAdmin ? [{ icon: <Users size={20} />, label: 'User Management', path: '/users' }] : []),
