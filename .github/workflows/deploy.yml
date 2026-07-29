@@ -25,7 +25,6 @@ jobs:
 
             # Update Backend dependencies and restart PM2
             npm install --production
-            pm2 restart nimet-adl-backend
 
             # Update Frontend dependencies and rebuild React app
             cd frontend
