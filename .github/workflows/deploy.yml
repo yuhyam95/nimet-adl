@@ -23,9 +23,9 @@ jobs:
             # Fetch latest changes
             git pull origin main
 
-            # Update Backend dependencies and restart PM2
+            # Update Backend dependencies
             npm install --production
-            pm2 restart nimet-adl-backend
+            # pm2 restart nimet-adl-backend
 
             # Update Frontend dependencies and rebuild React app
             cd frontend
