@@ -18,7 +18,7 @@ jobs:
           port: 22
           script: |
             # Navigate to the project directory
-            cd /nimet-adl
+            cd /opt/nimet-adl
 
             # Fetch latest changes
             git pull origin main
