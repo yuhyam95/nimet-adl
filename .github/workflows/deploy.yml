@@ -18,15 +18,15 @@ jobs:
           port: 22
           script: |
             # Navigate to the project directory
-            cd /opt/nimet-adl
-            
+            cd /nimet-adl
+
             # Fetch latest changes
             git pull origin main
-            
+
             # Update Backend dependencies and restart PM2
             npm install --production
             pm2 restart nimet-adl-backend
-            
+
             # Update Frontend dependencies and rebuild React app
             cd frontend
             npm install
