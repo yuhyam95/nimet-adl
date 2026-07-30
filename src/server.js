@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const db = require('./db/index.js');
@@ -8,7 +9,7 @@ const { hashPassword, comparePassword, generateToken } = require('./utils/auth.j
 const { protect } = require('./middleware/auth.js');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
