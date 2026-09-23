@@ -18,11 +18,24 @@ module.exports = {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
-            // Add provider to each logger
-            const loggers = response.data.data.map(logger => ({
-                ...logger,
-                provider: 'CLIMDES'
-            }));
+            // Add provider to each logger and filter out those with coordinates outside Nigeria.
+            // Bounding box for Nigeria:
+            // Latitude: 4.0 to 14.0, Longitude: 2.5 to 15.0
+            const loggers = (response.data.data || [])
+                .map(logger => ({
+                    ...logger,
+                    provider: 'CLIMDES'
+                }))
+                .filter(logger => {
+                    const lat = logger.location?.coordinates?.[1];
+                    const lon = logger.location?.coordinates?.[0];
+                    if (lat === null || lat === undefined || lon === null || lon === undefined) {
+                        return false;
+                    }
+                    const latNum = parseFloat(lat);
+                    const lonNum = parseFloat(lon);
+                    return latNum >= 4.0 && latNum <= 14.0 && lonNum >= 2.5 && lonNum <= 15.0;
+                });
 
             return { success: true, data: loggers };
         } catch (error) {

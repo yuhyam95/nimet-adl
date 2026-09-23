@@ -4,8 +4,8 @@ require('dotenv').config();
 
 const seedAdmin = async () => {
     const username = 'admin';
-    const password = 'Password@123'; // The user can change this later
-    
+    const password = 'Password@123'; //The user can change this later
+
     try {
         console.log('Ensuring users table exists...');
         await db.query(`
@@ -23,7 +23,7 @@ const seedAdmin = async () => {
 
         console.log('Seeding initial admin user...');
         const hashedPassword = await hashPassword(password);
-        
+
         const result = await db.query(`
             INSERT INTO users (username, password, name, role)
             VALUES ($1, $2, $3, $4)
@@ -32,7 +32,7 @@ const seedAdmin = async () => {
                 role = EXCLUDED.role
             RETURNING id, username, role
         `, [username, hashedPassword, 'Administrator', 'Admin']);
-        
+
         console.log('Admin user seeded successfully:', result.rows[0]);
     } catch (error) {
         console.error('Error seeding admin user:', error);

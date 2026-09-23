@@ -226,6 +226,14 @@ app.post('/api/stations', protect(['Admin', 'Data Manager']), async (req, res) =
             return res.status(400).json({ error: 'station_id is required' });
         }
 
+        if (provider === 'CLIMDES') {
+            const latVal = parseFloat(latitude);
+            const lonVal = parseFloat(longitude);
+            if (isNaN(latVal) || isNaN(lonVal) || latVal < 4.0 || latVal > 14.0 || lonVal < 2.5 || lonVal > 15.0) {
+                return res.status(400).json({ error: 'CLIMDES station coordinates must be within Nigeria (Latitude 4.0 to 14.0, Longitude 2.5 to 15.0)' });
+            }
+        }
+
         const query = `
             INSERT INTO stations (
                 station_id, station_name, latitude, longitude, model, location_type,
@@ -295,6 +303,14 @@ app.post('/api/stations/bulk', protect(['Admin', 'Data Manager']), async (req, r
             const results = [];
             for (const s of stations) {
                 if (!s.station_id) continue;
+
+                if (s.provider === 'CLIMDES') {
+                    const latVal = parseFloat(s.latitude);
+                    const lonVal = parseFloat(s.longitude);
+                    if (isNaN(latVal) || isNaN(lonVal) || latVal < 4.0 || latVal > 14.0 || lonVal < 2.5 || lonVal > 15.0) {
+                        continue; // Skip CLIMDES stations outside Nigeria
+                    }
+                }
 
                 const query = `
                     INSERT INTO stations (
