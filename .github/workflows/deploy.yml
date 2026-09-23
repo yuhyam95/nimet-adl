@@ -3,7 +3,7 @@ name: Deploy to Production
 on:
   push:
     branches:
-      - main
+      - production
 
 jobs:
   deploy:
@@ -21,7 +21,7 @@ jobs:
             cd /root/nimet-adl
 
             # Fetch latest changes
-            git pull origin main
+            git pull origin production
 
             # Update Backend dependencies and restart PM2
             npm install --production
