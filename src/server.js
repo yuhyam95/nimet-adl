@@ -789,8 +789,8 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+app.listen(port, '127.0.0.1', () => {
+    console.log(`Server running at http://127.0.0.1:${port}`);
     console.log(`- GET /api/weather`);
     console.log(`- GET /api/dataloggers`);
 
