@@ -1,7 +1,8 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const db = require('./db/index.js');
 const climdesService = require('./services/climdes.js');
 const tahmoService = require('./services/tahmo.js');
-require('dotenv').config();
 
 const fullSync = async () => {
     const startDate = '2025-07-07';
