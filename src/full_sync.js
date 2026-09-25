@@ -21,15 +21,15 @@ const fullSync = async () => {
             try {
                 const loggersResponse = await provider.service.fetchDataLoggers();
                 if (!loggersResponse || !loggersResponse.data) {
-                    console.error(`Failed to fetch loggers for ${provider.name}`);
+                    // console.error(`Failed to fetch loggers for ${provider.name}`);
                     continue;
                 }
 
                 const loggers = loggersResponse.data;
-                console.log(`Found ${loggers.length} total data loggers for ${provider.name}.`);
+                // console.log(`Found ${loggers.length} total data loggers for ${provider.name}.`);
 
                 for (const logger of loggers) {
-                    console.log(`Processing Station: ${logger.stationName} (${logger._id})`);
+                    // console.log(`Processing Station: ${logger.stationName} (${logger._id})`);
 
                     let currentStart = new Date(startDate);
                     const finalEnd = new Date(endDate);
@@ -42,7 +42,7 @@ const fullSync = async () => {
                         const startStr = currentStart.toISOString().split('T')[0];
                         const endStr = currentEnd.toISOString().split('T')[0];
 
-                        console.log(`  -> Fetching batch: ${startStr} to ${endStr}`);
+                        // console.log(`  -> Fetching batch: ${startStr} to ${endStr}`);
 
                         try {
                             const apiResponse = await provider.service.fetchWeatherData(startStr, endStr, logger._id);

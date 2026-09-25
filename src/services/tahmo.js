@@ -39,7 +39,7 @@ module.exports = {
     fetchWeatherData: async (startDate, endDate, stationId, collection = 'raw') => {
         try {
             const auth = Buffer.from(`${config.tahmo.apiKey}:${config.tahmo.apiSecret}`).toString('base64');
-            
+
             // TAHMO v2 expects ISO8601 timestamps. If only dates are provided, append time.
             let start = startDate;
             let end = endDate;
@@ -49,8 +49,8 @@ module.exports = {
             // TAHMO v2 measurements endpoint:
             // {{baseURL}}/measurements/v2/stations/[stationCode]/measurements/[collection]
             const url = `${config.tahmo.baseUrl}/measurements/v2/stations/${stationId}/measurements/${collection}`;
-            
-            console.log(`Fetching TAHMO data from: ${url}?start=${start}&end=${end}`);
+
+            // console.log(`Fetching TAHMO data from: ${url}?start=${start}&end=${end}`);
 
             const response = await axios.get(url, {
                 params: {
@@ -75,9 +75,9 @@ module.exports = {
                 }
             };
             search(response.data);
-            
+
             if (!dataSeries) {
-                console.log(`No valid measurement series found for station ${stationId}`);
+                // console.log(`No valid measurement series found for station ${stationId}`);
                 return { success: true, data: { stationName: stationId, readings: [] } };
             }
 
@@ -99,7 +99,7 @@ module.exports = {
             const mappingResult = await db.query(
                 "SELECT external_key, internal_field, conversion_formula FROM provider_mappings WHERE provider = 'TAHMO' AND is_active = true"
             );
-            
+
             const mappings = {};
             mappingResult.rows.forEach(row => {
                 mappings[row.external_key] = {
@@ -119,7 +119,7 @@ module.exports = {
 
                 const mapping = mappings[variable];
                 const internalField = mapping ? mapping.field : variable;
-                
+
                 let finalValue = value;
                 if (mapping && mapping.formula) {
                     try {
@@ -130,18 +130,18 @@ module.exports = {
                             // Basic support for other simple formulas if needed
                             // Note: In a production environment, use a proper math parser
                             const formula = mapping.formula.replace(/x/g, value);
-                            finalValue = eval(formula); 
+                            finalValue = eval(formula);
                         }
                     } catch (e) {
                         console.error(`Error applying formula ${mapping.formula} to value ${value}:`, e.message);
                     }
                 }
-                
+
                 groupedByTime[timestamp][internalField] = finalValue;
             });
 
             const readings = Object.values(groupedByTime);
-            console.log(`Success! Fixed and parsed ${readings.length} weather readings for ${stationId}`);
+            // console.log(`Success! Fixed and parsed ${readings.length} weather readings for ${stationId}`);
 
             return {
                 success: true,

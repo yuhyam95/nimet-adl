@@ -39,7 +39,7 @@ module.exports = {
 
             return { success: true, data: loggers };
         } catch (error) {
-            console.error('Error fetching CLIMDES data loggers:', error.message);
+            // console.error('Error fetching CLIMDES data loggers:', error.message);
             throw error;
         }
     },
@@ -74,7 +74,7 @@ module.exports = {
             const mappingResult = await db.query(
                 "SELECT external_key, internal_field, conversion_formula FROM provider_mappings WHERE provider = 'CLIMDES' AND is_active = true"
             );
-            
+
             const mappings = {};
             mappingResult.rows.forEach(row => {
                 mappings[row.external_key] = {
@@ -86,13 +86,13 @@ module.exports = {
             const rawReadings = weatherResponse.data.data?.readings || [];
             const mappedReadings = rawReadings.map(reading => {
                 const mapped = { timestamp: reading.timestamp };
-                
+
                 Object.entries(reading).forEach(([key, value]) => {
                     if (key === 'timestamp') return;
 
                     const mapping = mappings[key];
                     const internalField = mapping ? mapping.field : key;
-                    
+
                     let finalValue = value;
                     if (mapping && mapping.formula) {
                         try {
@@ -101,7 +101,7 @@ module.exports = {
                                 finalValue = eval(formula);
                             }
                         } catch (e) {
-                            console.error(`Error applying formula ${mapping.formula} to ${key}:`, e.message);
+                            // console.error(`Error applying formula ${mapping.formula} to ${key}:`, e.message);
                         }
                     }
                     mapped[internalField] = finalValue;
@@ -118,7 +118,7 @@ module.exports = {
             };
 
         } catch (error) {
-            console.error('CLIMDES API Error:', error.message);
+            // console.error('CLIMDES API Error:', error.message);
             throw error;
         }
     }
