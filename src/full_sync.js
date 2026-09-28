@@ -99,6 +99,11 @@ const insertReadings = async (stationName, dataLoggerId, location, readings) => 
     `;
 
     for (const record of readings) {
+        // Skip future timestamps (buggy datalogger clocks)
+        if (new Date(record.timestamp) > new Date()) {
+            continue;
+        }
+
         const params = [
             stationName,
             dataLoggerId,

@@ -187,6 +187,11 @@ const syncProviderData = async (providerName, startDate, endDate) => {
                             ...rest
                         } = record;
 
+                        // Skip future timestamps (buggy datalogger clocks)
+                        if (new Date(timestamp) > new Date()) {
+                            continue;
+                        }
+
                         const params = [
                             logger.stationName, logger._id,
                             logger.location?.coordinates?.[1], logger.location?.coordinates?.[0],

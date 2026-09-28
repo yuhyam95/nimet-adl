@@ -564,6 +564,9 @@ app.delete('/api/mappings/:id', protect(['Admin']), async (req, res) => {
 
 // 9. Export all stations to CSV
 app.post('/api/export/csv', protect(['Admin', 'Data Manager']), async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ success: false, error: 'Export functionality is disabled in production.' });
+    }
     try {
         const result = await exportAllStationsToCSV();
         res.json({
@@ -579,6 +582,9 @@ app.post('/api/export/csv', protect(['Admin', 'Data Manager']), async (req, res)
 
 // 9b. Upload specific station CSV to wis2box
 app.post('/api/export/wis2box', protect(['Admin', 'Data Manager']), async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+        return res.status(403).json({ success: false, message: 'Export functionality is disabled in production.' });
+    }
     try {
         const { stationId } = req.body;
         if (!stationId) {
@@ -822,10 +828,12 @@ app.listen(port, '127.0.0.1', () => {
     };
 
     // Periodic CSV export every 15 minutes (offset by 5 mins)
-    setTimeout(() => {
-        console.log('Starting periodic CSV export...');
-        runExport();
+    if (process.env.NODE_ENV !== 'production') {
+        setTimeout(() => {
+            console.log('Starting periodic CSV export...');
+            runExport();
 
-        setInterval(runExport, 15 * 60 * 1000);
-    }, 5 * 60 * 1000);
+            setInterval(runExport, 15 * 60 * 1000);
+        }, 5 * 60 * 1000);
+    }
 });
