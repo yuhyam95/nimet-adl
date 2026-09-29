@@ -81,31 +81,7 @@ app.get('/api/weather', protect(['Admin', 'Data Manager', 'Data Viewer']), async
 app.get('/api/dataloggers', protect(['Admin', 'Data Manager', 'Data Viewer']), async (req, res) => {
     try {
         const query = `
-      WITH recent_readings AS (
-        SELECT 
-          station_id,
-          timestamp,
-          ROW_NUMBER() OVER (PARTITION BY station_id ORDER BY timestamp DESC) as rn
-        FROM weather_readings
-      ),
-      reading_stats AS (
-        SELECT 
-          station_id,
-          COUNT(*) as total_recent_readings,
-          EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / NULLIF(COUNT(*) - 1, 0) as avg_interval_seconds
-        FROM recent_readings
-        WHERE rn <= 30
-        GROUP BY station_id
-      ),
-      count_24h AS (
-        SELECT
-          station_id,
-          COUNT(*) as readings_count_24h
-        FROM weather_readings
-        WHERE timestamp >= NOW() - INTERVAL '24 hours'
-        GROUP BY station_id
-      )
-      SELECT DISTINCT ON (s.station_id) 
+      SELECT 
         s.station_id, 
         s.station_name, 
         s.latitude, 
@@ -161,10 +137,27 @@ app.get('/api/dataloggers', protect(['Admin', 'Data Manager', 'Data Viewer']), a
         rs.avg_interval_seconds,
         COALESCE(c24.readings_count_24h, 0) as readings_count_24h
       FROM stations s
-      LEFT JOIN weather_readings wr ON s.station_id = wr.station_id
-      LEFT JOIN reading_stats rs ON s.station_id = rs.station_id
-      LEFT JOIN count_24h c24 ON s.station_id = c24.station_id
-      ORDER BY s.station_id, wr.timestamp DESC;
+      LEFT JOIN LATERAL (
+          SELECT * FROM weather_readings
+          WHERE station_id = s.station_id
+          ORDER BY timestamp DESC
+          LIMIT 1
+      ) wr ON true
+      LEFT JOIN LATERAL (
+          SELECT EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / NULLIF(COUNT(*) - 1, 0) as avg_interval_seconds
+          FROM (
+              SELECT timestamp FROM weather_readings
+              WHERE station_id = s.station_id
+              ORDER BY timestamp DESC
+              LIMIT 30
+          ) sub
+      ) rs ON true
+      LEFT JOIN LATERAL (
+          SELECT COUNT(*) as readings_count_24h
+          FROM weather_readings
+          WHERE station_id = s.station_id AND timestamp >= NOW() - INTERVAL '24 hours'
+      ) c24 ON true
+      ORDER BY s.station_id;
     `;
 
         const result = await db.query(query);

@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const db = require('./db/index.js');
 const climdesService = require('./services/climdes.js');
 const tahmoService = require('./services/tahmo.js');
+const { processFtpData } = require('./services/ftpImporter.js');
 
 /**
  * Main periodic sync function
@@ -73,6 +74,16 @@ const syncData = async (shouldClosePool = false) => {
             `);
         } catch (err) { /* ignore */ }
 
+        // Migration for FTP processed files
+        try {
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS processed_ftp_files (
+                    filename VARCHAR(255) PRIMARY KEY,
+                    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+        } catch (err) { /* ignore */ }
+
         const providers = ['CLIMDES', 'TAHMO'];
         const today = new Date().toISOString().split('T')[0];
         const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -83,6 +94,13 @@ const syncData = async (shouldClosePool = false) => {
                 console.error(`Error during periodic sync for ${provider}:`, err.message);
             });
         }
+        
+        // Add FTP Sync
+        console.log(`Starting periodic FTP data sync...`);
+        await processFtpData().catch(err => {
+             console.error(`Error during FTP sync:`, err.message);
+        });
+
         console.log('Periodic data sync completed.');
     } catch (error) {
         console.error('Fatal error during sync:', error);
