@@ -3,7 +3,125 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const db = require('./db/index.js');
 const climdesService = require('./services/climdes.js');
 const tahmoService = require('./services/tahmo.js');
+const pulsowebService = require('./services/pulsoweb.js');
 const { processFtpData } = require('./services/ftpImporter.js');
+const { reverseGeocode } = require('./services/geocoding.js');
+
+const providerServices = {
+    CLIMDES: climdesService,
+    TAHMO: tahmoService,
+    PULSOWEB: pulsowebService
+};
+
+async function upsertProviderStation(logger, providerName) {
+    const stationParams = [
+        logger._id,
+        logger.stationName,
+        logger.location?.coordinates?.[1],
+        logger.location?.coordinates?.[0],
+        logger.dataLoggerModel,
+        logger.location?.type,
+        logger.organization?.name,
+        logger.location?.country,
+        logger.lastReading,
+        logger.isActive,
+        providerName,
+        logger.sourceStationId || logger._id,
+        logger.sourceTimezone || null,
+        logger.collectionStartAt || null
+    ];
+
+    return db.query(`
+        INSERT INTO stations (
+            station_id, station_name, latitude, longitude,
+            model, location_type, organization, country, last_reading_at, is_active, provider,
+            source_station_id, source_timezone, collection_start_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+        ON CONFLICT (station_id) DO UPDATE SET
+            station_name = EXCLUDED.station_name,
+            latitude = CASE
+                WHEN EXCLUDED.provider = 'PULSOWEB' THEN COALESCE(stations.latitude, EXCLUDED.latitude)
+                ELSE COALESCE(EXCLUDED.latitude, stations.latitude)
+            END,
+            longitude = CASE
+                WHEN EXCLUDED.provider = 'PULSOWEB' THEN COALESCE(stations.longitude, EXCLUDED.longitude)
+                ELSE COALESCE(EXCLUDED.longitude, stations.longitude)
+            END,
+            model = EXCLUDED.model,
+            location_type = EXCLUDED.location_type,
+            organization = EXCLUDED.organization,
+            country = COALESCE(EXCLUDED.country, stations.country),
+            last_reading_at = COALESCE(EXCLUDED.last_reading_at, stations.last_reading_at),
+            is_active = EXCLUDED.is_active,
+            provider = EXCLUDED.provider,
+            source_station_id = EXCLUDED.source_station_id,
+            source_timezone = COALESCE(stations.source_timezone, EXCLUDED.source_timezone),
+            collection_start_at = COALESCE(stations.collection_start_at, EXCLUDED.collection_start_at),
+            updated_at = NOW()
+        RETURNING source_timezone, collection_start_at;
+    `, stationParams);
+}
+
+async function importProviderStations(providerName) {
+    const normalizedProvider = String(providerName || '').toUpperCase();
+    const providerService = providerServices[normalizedProvider];
+    if (!providerService) throw new Error(`Unsupported provider: ${providerName}`);
+
+    const loggersResponse = await providerService.fetchDataLoggers();
+    if (!loggersResponse || !Array.isArray(loggersResponse.data)) {
+        throw new Error(`Failed to fetch loggers for ${normalizedProvider}`);
+    }
+
+    for (const logger of loggersResponse.data) {
+        await upsertProviderStation(logger, normalizedProvider);
+    }
+
+    return { count: loggersResponse.data.length, stations: loggersResponse.data };
+}
+
+async function geocodeProviderStations(providerName) {
+    const normalizedProvider = String(providerName || '').toUpperCase();
+    const result = await db.query(
+        `SELECT station_id, latitude, longitude
+         FROM stations
+         WHERE provider = $1
+           AND latitude IS NOT NULL
+           AND longitude IS NOT NULL
+           AND (state IS NULL OR lga IS NULL)
+           AND geocoded_at IS NULL
+         ORDER BY station_id`,
+        [normalizedProvider]
+    );
+
+    let updated = 0;
+    let failed = 0;
+
+    for (const station of result.rows) {
+        try {
+            const location = await reverseGeocode(station.latitude, station.longitude);
+            await db.query(
+                `UPDATE stations
+                 SET state = $1,
+                     lga = $2,
+                     country = COALESCE($3, country),
+                     geocoded_at = NOW(),
+                     updated_at = NOW()
+                 WHERE station_id = $4`,
+                [location.state, location.lga, location.country, station.station_id]
+            );
+            updated += 1;
+        } catch (error) {
+            failed += 1;
+            await db.query(
+                'UPDATE stations SET geocoded_at = NOW() WHERE station_id = $1',
+                [station.station_id]
+            );
+            console.error(`Could not detect State/LGA for ${station.station_id}:`, error.message);
+        }
+    }
+
+    return { attempted: result.rows.length, updated, failed };
+}
 
 /**
  * Main periodic sync function
@@ -22,9 +140,15 @@ const syncData = async (shouldClosePool = false) => {
                 location_type VARCHAR(255),
                 organization VARCHAR(255),
                 country VARCHAR(255),
+                state VARCHAR(255),
+                lga VARCHAR(255),
+                geocoded_at TIMESTAMPTZ,
                 last_reading_at TIMESTAMP,
                 is_active BOOLEAN DEFAULT FALSE,
                 provider VARCHAR(50) DEFAULT 'CLIMDES',
+                source_station_id VARCHAR(255),
+                source_timezone VARCHAR(64),
+                collection_start_at TIMESTAMPTZ,
                 wigos_id VARCHAR(255),
                 wsi_series VARCHAR(255),
                 wsi_issuer VARCHAR(255),
@@ -53,6 +177,12 @@ const syncData = async (shouldClosePool = false) => {
             await db.query(`
                 ALTER TABLE stations 
                 ADD COLUMN IF NOT EXISTS provider VARCHAR(50) DEFAULT 'CLIMDES',
+                ADD COLUMN IF NOT EXISTS source_station_id VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS source_timezone VARCHAR(64),
+                ADD COLUMN IF NOT EXISTS collection_start_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS state VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS lga VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS geocoded_at TIMESTAMPTZ,
                 ADD COLUMN IF NOT EXISTS wigos_id VARCHAR(255),
                 ADD COLUMN IF NOT EXISTS wsi_series VARCHAR(255),
                 ADD COLUMN IF NOT EXISTS wsi_issuer VARCHAR(255),
@@ -74,6 +204,16 @@ const syncData = async (shouldClosePool = false) => {
             `);
         } catch (err) { /* ignore */ }
 
+        try {
+            await db.query(`
+                CREATE UNIQUE INDEX IF NOT EXISTS stations_provider_source_id_idx
+                ON stations (provider, source_station_id)
+                WHERE source_station_id IS NOT NULL;
+            `);
+        } catch (err) {
+            console.error('Could not create provider/source station index:', err.message);
+        }
+
         // Migration for FTP processed files
         try {
             await db.query(`
@@ -85,12 +225,15 @@ const syncData = async (shouldClosePool = false) => {
         } catch (err) { /* ignore */ }
 
         const providers = ['CLIMDES', 'TAHMO'];
+        if (process.env.PULSOWEB_API_TOKEN) providers.push('PULSOWEB');
         const today = new Date().toISOString().split('T')[0];
         const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString().split('T')[0];
 
         for (const provider of providers) {
             console.log(`Starting periodic data sync for provider: ${provider} (last 48h)...`);
-            await syncProviderData(provider, fortyEightHoursAgo, today).catch(err => {
+            await syncProviderData(provider, fortyEightHoursAgo, today, {
+                incremental: provider === 'PULSOWEB'
+            }).catch(err => {
                 console.error(`Error during periodic sync for ${provider}:`, err.message);
             });
         }
@@ -113,12 +256,15 @@ const syncData = async (shouldClosePool = false) => {
 
 /**
  * Syncs data for a specific provider within a date range
- * @param {string} providerName - 'CLIMDES' or 'TAHMO'
+ * @param {string} providerName - configured provider name
  * @param {string} startDate - YYYY-MM-DD
  * @param {string} endDate - YYYY-MM-DD
+ * @param {{incremental?: boolean}} options - provider sync options
  */
-const syncProviderData = async (providerName, startDate, endDate) => {
-    const providerService = providerName === 'TAHMO' ? tahmoService : climdesService;
+const syncProviderData = async (providerName, startDate, endDate, options = {}) => {
+    const normalizedProvider = String(providerName || '').toUpperCase();
+    const providerService = providerServices[normalizedProvider];
+    if (!providerService) throw new Error(`Unsupported provider: ${providerName}`);
     
     try {
         const loggersResponse = await providerService.fetchDataLoggers();
@@ -127,70 +273,87 @@ const syncProviderData = async (providerName, startDate, endDate) => {
         }
 
         const loggers = loggersResponse.data;
-        console.log(`Found ${loggers.length} loggers for ${providerName}. Syncing range: ${startDate} to ${endDate}`);
+        console.log(`Found ${loggers.length} loggers for ${normalizedProvider}. Syncing range: ${startDate} to ${endDate}`);
 
         for (const logger of loggers) {
             try {
                 // Upsert station metadata
-                const stationParams = [
-                    logger._id,
-                    logger.stationName,
-                    logger.location?.coordinates?.[1],
-                    logger.location?.coordinates?.[0],
-                    logger.dataLoggerModel,
-                    logger.location?.type,
-                    logger.organization?.name,
-                    logger.location?.country,
-                    logger.lastReading,
-                    logger.isActive,
-                    providerName
-                ];
-
-                const upsertStationQuery = `
-                    INSERT INTO stations (
-                        station_id, station_name, latitude, longitude, 
-                        model, location_type, organization, country, last_reading_at, is_active, provider, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                    ON CONFLICT (station_id) DO UPDATE SET
-                        station_name = EXCLUDED.station_name,
-                        latitude = EXCLUDED.latitude,
-                        longitude = EXCLUDED.longitude,
-                        model = EXCLUDED.model,
-                        location_type = EXCLUDED.location_type,
-                        organization = EXCLUDED.organization,
-                        country = EXCLUDED.country,
-                        last_reading_at = EXCLUDED.last_reading_at,
-                        is_active = EXCLUDED.is_active,
-                        provider = EXCLUDED.provider,
-                        updated_at = NOW();
-                `;
-
-                await db.query(upsertStationQuery, stationParams);
+                const upsertedStation = await upsertProviderStation(logger, normalizedProvider);
+                const stationSourceTimezone = upsertedStation.rows[0]?.source_timezone || logger.sourceTimezone;
+                const stationCollectionStart = upsertedStation.rows[0]?.collection_start_at || logger.collectionStartAt;
 
                 if (!logger.isActive) continue;
 
-                // Split large ranges into chunks if needed (e.g. for TAHMO)
-                const timeRanges = [];
-                let currentStart = new Date(startDate);
-                const finalEnd = new Date(endDate);
+                let effectiveStartDate = startDate;
+                let effectiveEndDate = endDate;
 
+                if (normalizedProvider === 'PULSOWEB' && options.incremental) {
+                    const latestResult = await db.query(
+                        'SELECT MAX(timestamp) AS latest_timestamp FROM weather_readings WHERE station_id = $1',
+                        [logger._id]
+                    );
+                    const latestTimestamp = latestResult.rows[0]?.latest_timestamp;
+
+                    if (latestTimestamp) {
+                        const overlapStart = new Date(new Date(latestTimestamp).getTime() - 5 * 60 * 1000);
+                        const configuredStart = stationCollectionStart ? new Date(stationCollectionStart) : null;
+                        effectiveStartDate = configuredStart && configuredStart > overlapStart
+                            ? configuredStart.toISOString()
+                            : overlapStart.toISOString();
+                    } else if (stationCollectionStart) {
+                        effectiveStartDate = new Date(stationCollectionStart).toISOString();
+                    }
+
+                    const localNow = pulsowebService.formatDateInTimezone(
+                        new Date(),
+                        stationSourceTimezone
+                    );
+                    const completedLocalHour = `${localNow.slice(0, 13)}:00:00`;
+                    effectiveEndDate = pulsowebService.localDateTimeToIso(
+                        completedLocalHour,
+                        stationSourceTimezone
+                    );
+                }
+
+                // Split large ranges into chunks to keep upstream requests bounded.
+                const timeRanges = [];
+                let currentStart = new Date(effectiveStartDate);
+                const finalEnd = new Date(effectiveEndDate);
+                const preserveTime = String(effectiveStartDate).includes('T') || String(effectiveEndDate).includes('T');
+
+                if (Number.isNaN(currentStart.getTime()) || Number.isNaN(finalEnd.getTime())) {
+                    throw new Error(`Invalid sync range: ${effectiveStartDate} to ${effectiveEndDate}`);
+                }
+
+                let firstRange = true;
                 while (currentStart <= finalEnd) {
                     let currentEndPeriod = new Date(currentStart);
                     currentEndPeriod.setDate(currentStart.getDate() + 30); // 30-day chunks
                     if (currentEndPeriod > finalEnd) currentEndPeriod = finalEnd;
                     
                     timeRanges.push({
-                        start: currentStart.toISOString().split('T')[0],
-                        end: currentEndPeriod.toISOString().split('T')[0]
+                        start: firstRange
+                            ? effectiveStartDate
+                            : (preserveTime ? currentStart.toISOString() : currentStart.toISOString().split('T')[0]),
+                        end: currentEndPeriod >= finalEnd
+                            ? effectiveEndDate
+                            : (preserveTime ? currentEndPeriod.toISOString() : currentEndPeriod.toISOString().split('T')[0])
                     });
+                    firstRange = false;
                     
                     if (currentEndPeriod >= finalEnd) break;
                     currentStart = new Date(currentEndPeriod);
-                    currentStart.setDate(currentStart.getDate() + 1);
+                    if (!preserveTime) currentStart.setDate(currentStart.getDate() + 1);
                 }
 
+                let latestInsertedTimestamp = null;
                 for (const range of timeRanges) {
-                    const apiResponse = await providerService.fetchWeatherData(range.start, range.end, logger._id);
+                    const apiResponse = await providerService.fetchWeatherData(
+                        range.start,
+                        range.end,
+                        logger.sourceStationId || logger._id,
+                        { timezone: stationSourceTimezone }
+                    );
                     const readings = apiResponse?.data?.readings;
                     if (!readings || readings.length === 0) continue;
 
@@ -239,6 +402,8 @@ const syncProviderData = async (providerName, startDate, endDate) => {
                                 precipitation = EXCLUDED.precipitation,
                                 solar_radiation = EXCLUDED.solar_radiation,
                                 atmospheric_pressure = EXCLUDED.atmospheric_pressure,
+                                soil_temperature = EXCLUDED.soil_temperature,
+                                battery_voltage = EXCLUDED.battery_voltage,
                                 wind_gust = EXCLUDED.wind_gust,
                                 lightning_strike_count = EXCLUDED.lightning_strike_count,
                                 lightning_strike_distance = EXCLUDED.lightning_strike_distance,
@@ -248,12 +413,26 @@ const syncProviderData = async (providerName, startDate, endDate) => {
                                 volumetric_water_content = EXCLUDED.volumetric_water_content,
                                 metadata = EXCLUDED.metadata;
                         `;
-                        await db.query(insertQuery, params).catch(e => {
+                        try {
+                            await db.query(insertQuery, params);
+                            if (!latestInsertedTimestamp || new Date(timestamp) > new Date(latestInsertedTimestamp)) {
+                                latestInsertedTimestamp = timestamp;
+                            }
+                        } catch (e) {
                             if (!e.message.includes('unique constraint')) {
                                 console.error(`Insert error for ${logger._id}: ${e.message}`);
                             }
-                        });
+                        }
                     }
+                }
+
+                if (latestInsertedTimestamp) {
+                    await db.query(
+                        `UPDATE stations
+                         SET last_reading_at = GREATEST(COALESCE(last_reading_at, $1), $1), updated_at = NOW()
+                         WHERE station_id = $2`,
+                        [latestInsertedTimestamp, logger._id]
+                    );
                 }
                 
                 // Dispatch newly fetched data to WIS2BOX
@@ -276,8 +455,14 @@ const syncProviderData = async (providerName, startDate, endDate) => {
                 console.error(`Error processing logger ${logger._id}: ${err.message}`);
             }
         }
+
+        const geocoding = await geocodeProviderStations(normalizedProvider);
+        console.log(
+            `Location detection for ${normalizedProvider}: ${geocoding.updated} updated, ${geocoding.failed} failed.`
+        );
+        return { geocoding };
     } catch (error) {
-        console.error(`Sync provider error for ${providerName}:`, error.message);
+        console.error(`Sync provider error for ${normalizedProvider}:`, error.message);
         throw error;
     }
 };
@@ -286,4 +471,4 @@ if (require.main === module) {
     syncData(true);
 }
 
-module.exports = { syncData, syncProviderData };
+module.exports = { importProviderStations, geocodeProviderStations, syncData, syncProviderData };

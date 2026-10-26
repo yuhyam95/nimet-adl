@@ -29,6 +29,13 @@ module.exports = {
       apiSecret: process.env.TAHMO_API_SECRET
     };
   },
+  get pulsoweb() {
+    return {
+      baseUrl: process.env.PULSOWEB_API_BASE_URL || 'https://app.pulsonic.com/rest',
+      apiToken: process.env.PULSOWEB_API_TOKEN,
+      defaultTimezone: process.env.PULSOWEB_DEFAULT_TIMEZONE || 'Africa/Lagos'
+    };
+  },
   get wagtech() {
     return {
       ftpHost: process.env.WAGTECH_FTP_HOST,

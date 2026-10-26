@@ -17,7 +17,8 @@ import {
     Table as TableIcon,
     LayoutGrid,
     Maximize2,
-    Minimize2
+    Minimize2,
+    Search
 } from 'lucide-react';
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
@@ -40,8 +41,8 @@ L.Marker.prototype.options.icon = DefaultIcon;
 interface Station {
     station_id: string;
     station_name: string;
-    latitude: number;
-    longitude: number;
+    latitude: number | null;
+    longitude: number | null;
     air_temperature: number;
     relative_humidity: number;
     wind_speed: number;
@@ -55,6 +56,8 @@ interface Station {
     is_active: boolean;
     provider: string;
     organization?: string;
+    state?: string;
+    lga?: string;
 }
 
 const Dashboard = () => {
@@ -62,6 +65,7 @@ const Dashboard = () => {
     const [filterProvider, setFilterProvider] = useState<string>('all');
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [filterTransmission, setFilterTransmission] = useState<string>('all');
+    const [searchTerm, setSearchTerm] = useState('');
     const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
     useEffect(() => {
@@ -102,6 +106,15 @@ const Dashboard = () => {
 
     const filteredStations = useMemo(() => {
         const filtered = stations.filter((station: Station) => {
+            const normalizedSearch = searchTerm.trim().toLowerCase();
+            const matchesSearch = !normalizedSearch || [
+                station.station_name,
+                station.station_id,
+                station.provider,
+                station.organization,
+                station.state,
+                station.lga
+            ].some(value => String(value || '').toLowerCase().includes(normalizedSearch));
             const matchesProvider = filterProvider === 'all' || station.provider === filterProvider;
             const matchesStatus = filterStatus === 'all' || (filterStatus === 'active' ? station.is_active : !station.is_active);
 
@@ -110,12 +123,12 @@ const Dashboard = () => {
             const matchesTransmission = filterTransmission === 'all' ||
                 (filterTransmission === 'transmitting' ? isTransmitting : !isTransmitting);
 
-            return matchesProvider && matchesStatus && matchesTransmission;
+            return matchesSearch && matchesProvider && matchesStatus && matchesTransmission;
         });
 
         // Sort stations alphabetically by station_name
         return filtered.sort((a: Station, b: Station) => (a.station_name || '').localeCompare(b.station_name || ''));
-    }, [stations, filterProvider, filterStatus, filterTransmission]);
+    }, [stations, searchTerm, filterProvider, filterStatus, filterTransmission]);
 
     const stats = useMemo(() => {
         if (!stations.length) {
@@ -225,8 +238,13 @@ const Dashboard = () => {
     }
 
     const defaultCenter: [number, number] = [9.0820, 8.6753];
-    const mapCenter: [number, number] = filteredStations.length > 0 && filteredStations[0].latitude && filteredStations[0].longitude
-        ? [Number(filteredStations[0].latitude), Number(filteredStations[0].longitude)]
+    const firstMappableStation = filteredStations.find((station: Station) =>
+        station.latitude !== null && station.latitude !== undefined &&
+        station.longitude !== null && station.longitude !== undefined &&
+        Number.isFinite(Number(station.latitude)) && Number.isFinite(Number(station.longitude))
+    );
+    const mapCenter: [number, number] = firstMappableStation
+        ? [Number(firstMappableStation.latitude), Number(firstMappableStation.longitude)]
         : defaultCenter;
 
     return (
@@ -277,6 +295,20 @@ const Dashboard = () => {
 
                 {/* Filters */}
                 <div className={styles.filters}>
+                    <div className={`${styles.filterGroup} ${styles.searchGroup}`}>
+                        <label className={styles.filterLabel} htmlFor="dashboard-station-search">Search stations</label>
+                        <div className={styles.searchWrapper}>
+                            <Search size={16} aria-hidden="true" />
+                            <input
+                                id="dashboard-station-search"
+                                type="search"
+                                className={styles.searchInput}
+                                value={searchTerm}
+                                onChange={(event) => setSearchTerm(event.target.value)}
+                                placeholder="Name, ID, provider or organization"
+                            />
+                        </div>
+                    </div>
                     <div className={styles.filterGroup}>
                         <label className={styles.filterLabel} htmlFor="dashboard-provider-filter">Provider</label>
                         <select
@@ -339,16 +371,17 @@ const Dashboard = () => {
                                     <div className={styles.cardHeader}>
                                         <div className={styles.cardTitle}>
                                             <MapPin size={18} />
-                                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '150px' }}>
+                                            <div className={styles.cardIdentity}>
+                                                <span className={styles.stationName}>
                                                     {station.station_name}
                                                 </span>
-                                                <span style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 500 }}>
+                                                <span className={styles.stationMeta}>
                                                     {station.provider || 'CLIMDES'}
+                                                    {(station.lga || station.state) && ` · ${[station.lga, station.state].filter(Boolean).join(', ')}`}
                                                 </span>
                                             </div>
                                         </div>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' }}>
+                                        <div className={styles.statusRow}>
                                             <div className={`${styles.statusBadge} ${isActive ? styles.statusActive : styles.statusInactive}`}>
                                                 <Activity size={12} />
                                                 {status}
@@ -430,6 +463,7 @@ const Dashboard = () => {
                                     <th>Station Name</th>
                                     <th>Provider</th>
                                     <th>Coordinates</th>
+                                    <th>State / LGA</th>
                                     <th>Organization</th>
                                     <th>Latest Reading</th>
                                     <th>Functional Status</th>
@@ -454,7 +488,8 @@ const Dashboard = () => {
                                                     {station.provider}
                                                 </span>
                                             </td>
-                                            <td>{station.latitude}, {station.longitude}</td>
+                                            <td>{station.latitude != null && station.longitude != null ? `${station.latitude}, ${station.longitude}` : 'Not provided'}</td>
+                                            <td>{[station.state, station.lga].filter(Boolean).join(' / ') || '-'}</td>
                                             <td>{station.organization || '-'}</td>
                                             <td className={styles.lastUpdate}>
                                                 {lastUpdate ? lastUpdate.toLocaleString() : 'Never'}
@@ -486,7 +521,7 @@ const Dashboard = () => {
                                 })}
                                 {filteredStations.length === 0 && (
                                     <tr>
-                                        <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                                        <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                                             No stations match the selected filters.
                                         </td>
                                     </tr>
@@ -533,9 +568,11 @@ const Dashboard = () => {
                                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             />
                             {filteredStations.map((station: Station) => {
+                                if (station.latitude === null || station.latitude === undefined ||
+                                    station.longitude === null || station.longitude === undefined) return null;
                                 const lat = Number(station.latitude);
                                 const lng = Number(station.longitude);
-                                if (isNaN(lat) || isNaN(lng)) return null;
+                                if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
                                 const lastUpdate = station.last_reading_at ? new Date(station.last_reading_at) : null;
                                 const isActive = station.is_active;

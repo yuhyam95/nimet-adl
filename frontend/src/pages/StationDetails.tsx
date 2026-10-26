@@ -18,6 +18,7 @@ import { ArrowLeft, MapPin, Clock, ChevronLeft, ChevronRight, Download, Filter, 
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
+import { useAuth } from '../context/AuthContext';
 import styles from './StationDetails.module.css';
 
 // Fix for Leaflet default marker icon in Vite/React
@@ -65,15 +66,21 @@ interface WeatherReading {
 interface Station {
     station_id: string;
     station_name: string;
-    latitude: number;
-    longitude: number;
+    latitude: number | null;
+    longitude: number | null;
     model?: string;
     location_type?: string;
     organization?: string;
     country?: string;
+    state?: string;
+    lga?: string;
+    geocoded_at?: string;
     last_reading_at: string;
     is_active: boolean;
     provider: string;
+    source_station_id?: string;
+    source_timezone?: string;
+    collection_start_at?: string;
     wigos_id?: string;
     wsi_series?: string;
     wsi_issuer?: string;
@@ -97,6 +104,7 @@ interface Station {
 
 const StationDetails = () => {
     const { id } = useParams<{ id: string }>();
+    const { user } = useAuth();
     const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
     const [isFiltered, setIsFiltered] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -107,6 +115,15 @@ const StationDetails = () => {
     const [wigosForm, setWigosForm] = useState<Partial<Station>>({});
     const [savingWigos, setSavingWigos] = useState(false);
     const [wigosError, setWigosError] = useState<string | null>(null);
+    const [isEditingSource, setIsEditingSource] = useState(false);
+    const [sourceForm, setSourceForm] = useState({ source_timezone: '', collection_start_at: '' });
+    const [savingSource, setSavingSource] = useState(false);
+    const [sourceError, setSourceError] = useState<string | null>(null);
+    const [isEditingLocation, setIsEditingLocation] = useState(false);
+    const [locationForm, setLocationForm] = useState({ latitude: '', longitude: '' });
+    const [savingLocation, setSavingLocation] = useState(false);
+    const [detectingLocation, setDetectingLocation] = useState(false);
+    const [locationError, setLocationError] = useState<string | null>(null);
 
     const handleWigosSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -129,6 +146,59 @@ const StationDetails = () => {
             setWigosError(err.response?.data?.message || err.message || 'Failed to save WIGOS metadata');
         } finally {
             setSavingWigos(false);
+        }
+    };
+
+    const handleSourceSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSavingSource(true);
+        setSourceError(null);
+        try {
+            await axios.patch(`/api/stations/${id}/source`, {
+                source_timezone: sourceForm.source_timezone,
+                collection_start_at: sourceForm.collection_start_at || null
+            });
+            await refetchStations();
+            setIsEditingSource(false);
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.message : null;
+            setSourceError(message || (err instanceof Error ? err.message : 'Failed to save source settings'));
+        } finally {
+            setSavingSource(false);
+        }
+    };
+
+    const handleLocationSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSavingLocation(true);
+        setLocationError(null);
+
+        try {
+            await axios.patch(`/api/stations/${encodeURIComponent(id || '')}/location`, {
+                latitude: locationForm.latitude,
+                longitude: locationForm.longitude
+            });
+            await refetchStations();
+            setIsEditingLocation(false);
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.message : null;
+            setLocationError(message || (err instanceof Error ? err.message : 'Failed to save station coordinates'));
+        } finally {
+            setSavingLocation(false);
+        }
+    };
+
+    const handleDetectLocation = async () => {
+        setDetectingLocation(true);
+        setLocationError(null);
+        try {
+            await axios.post(`/api/stations/${encodeURIComponent(id || '')}/geocode`);
+            await refetchStations();
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.message : null;
+            setLocationError(message || (err instanceof Error ? err.message : 'Failed to detect State and LGA'));
+        } finally {
+            setDetectingLocation(false);
         }
     };
 
@@ -343,7 +413,7 @@ const StationDetails = () => {
                 r.wind_direction ?? '',
                 r.wind_gust ?? '',
                 r.precipitation ?? '',
-                r.solar_radiation ?? '',
+                r.solar_radiation == null ? '' : Math.round(Number(r.solar_radiation)),
                 r.atmospheric_pressure ?? '',
                 r.soil_temperature ?? '',
                 r.volumetric_water_content ?? '',
@@ -484,7 +554,9 @@ const StationDetails = () => {
                     <div className={styles.meta}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <MapPin size={16} />
-                            {station.latitude}, {station.longitude}
+                            {station.latitude != null && station.longitude != null
+                                ? `${station.latitude}, ${station.longitude}`
+                                : 'Coordinates not set'}
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <Clock size={16} />
@@ -592,7 +664,15 @@ const StationDetails = () => {
                                 <div style={{ fontWeight: 500, color: '#111827' }}>{station.organization || 'N/A'}</div>
 
                                 <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Coordinates:</div>
-                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.latitude}, {station.longitude}</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>
+                                    {station.latitude != null && station.longitude != null ? `${station.latitude}, ${station.longitude}` : 'Not provided'}
+                                </div>
+
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>State:</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.state || 'Not detected'}</div>
+
+                                <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>LGA:</div>
+                                <div style={{ fontWeight: 500, color: '#111827' }}>{station.lga || 'Not detected'}</div>
 
                                 <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>Reporting Frequency:</div>
                                 <div style={{ fontWeight: 500, color: '#111827', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -614,24 +694,192 @@ const StationDetails = () => {
                         </div>
 
                         <div style={{ flex: '1', minWidth: '300px', height: '250px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-                            <MapContainer
-                                center={[station.latitude, station.longitude]}
-                                zoom={13}
-                                style={{ height: '100%', width: '100%' }}
-                            >
-                                <TileLayer
-                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                />
-                                <Marker position={[station.latitude, station.longitude]}>
-                                    <Popup>
-                                        <strong>{station.station_name}</strong>
-                                    </Popup>
-                                </Marker>
-                            </MapContainer>
+                            {station.latitude !== null && station.latitude !== undefined &&
+                             station.longitude !== null && station.longitude !== undefined &&
+                             Number.isFinite(Number(station.latitude)) && Number.isFinite(Number(station.longitude)) ? (
+                                <MapContainer
+                                    center={[Number(station.latitude), Number(station.longitude)]}
+                                    zoom={13}
+                                    style={{ height: '100%', width: '100%' }}
+                                >
+                                    <TileLayer
+                                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                    />
+                                    <Marker position={[Number(station.latitude), Number(station.longitude)]}>
+                                        <Popup>
+                                            <strong>{station.station_name}</strong>
+                                        </Popup>
+                                    </Marker>
+                                </MapContainer>
+                            ) : (
+                                <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#6b7280', padding: '24px', textAlign: 'center' }}>
+                                    Coordinates are not available. An administrator can add them below to enable the map.
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
+
+                {user?.role === 'Admin' && (
+                    <div className={styles.chartCard} style={{ gridColumn: '1 / -1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+                            <div>
+                                <h3>Station Coordinates</h3>
+                                <p style={{ color: '#6b7280', marginTop: '4px' }}>
+                                    State and LGA are detected automatically when coordinates are saved.
+                                </p>
+                            </div>
+                            {!isEditingLocation ? (
+                                <button
+                                    onClick={() => {
+                                        setLocationForm({
+                                            latitude: station.latitude == null ? '' : String(station.latitude),
+                                            longitude: station.longitude == null ? '' : String(station.longitude)
+                                        });
+                                        setLocationError(null);
+                                        setIsEditingLocation(true);
+                                    }}
+                                    style={{ padding: '6px 12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                >
+                                    Edit Coordinates
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => setIsEditingLocation(false)}
+                                    style={{ padding: '6px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+
+                        {isEditingLocation ? (
+                            <form onSubmit={handleLocationSubmit} style={{ marginTop: '16px' }}>
+                                {locationError && <div style={{ color: '#b91c1c', marginBottom: '12px' }}>{locationError}</div>}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                                    <div>
+                                        <label htmlFor="station-latitude" style={{ display: 'block', marginBottom: '4px' }}>Latitude</label>
+                                        <input
+                                            id="station-latitude"
+                                            type="number"
+                                            min="-90"
+                                            max="90"
+                                            step="any"
+                                            required
+                                            value={locationForm.latitude}
+                                            onChange={(event) => setLocationForm({ ...locationForm, latitude: event.target.value })}
+                                            placeholder="e.g. 9.0820"
+                                            style={{ width: '100%', padding: '8px' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="station-longitude" style={{ display: 'block', marginBottom: '4px' }}>Longitude</label>
+                                        <input
+                                            id="station-longitude"
+                                            type="number"
+                                            min="-180"
+                                            max="180"
+                                            step="any"
+                                            required
+                                            value={locationForm.longitude}
+                                            onChange={(event) => setLocationForm({ ...locationForm, longitude: event.target.value })}
+                                            placeholder="e.g. 8.6753"
+                                            style={{ width: '100%', padding: '8px' }}
+                                        />
+                                    </div>
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={savingLocation}
+                                    style={{ marginTop: '16px', padding: '8px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                >
+                                    {savingLocation ? 'Saving…' : 'Save Coordinates'}
+                                </button>
+                            </form>
+                        ) : (
+                            <div style={{ marginTop: '16px' }}>
+                                {locationError && <div style={{ color: '#b91c1c', marginBottom: '12px' }}>{locationError}</div>}
+                                <div style={{ fontWeight: 500 }}>
+                                    {station.latitude != null && station.longitude != null
+                                        ? `${station.latitude}, ${station.longitude}`
+                                        : 'No coordinates configured'}
+                                </div>
+                                <div style={{ color: '#6b7280', marginTop: '6px' }}>
+                                    {[station.lga, station.state].filter(Boolean).join(', ') || 'State and LGA have not been detected'}
+                                </div>
+                                {station.latitude != null && station.longitude != null && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={handleDetectLocation}
+                                            disabled={detectingLocation}
+                                            style={{ marginTop: '12px', padding: '7px 12px', background: '#0f766e', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                        >
+                                            {detectingLocation ? 'Detecting…' : 'Retry State & LGA Detection'}
+                                        </button>
+                                        <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '8px' }}>
+                                            Saving coordinates or clicking retry sends this station’s latitude and longitude to the OpenStreetMap Nominatim service and caches the returned location locally.
+                                        </p>
+                                    </>
+                                )}
+                                <p style={{ color: '#6b7280', fontSize: '0.75rem', marginTop: '10px' }}>
+                                    Location data © OpenStreetMap contributors, ODbL 1.0
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {station.provider === 'PULSOWEB' && (
+                    <div className={styles.chartCard} style={{ gridColumn: '1 / -1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3>PulsoWeb Collection Settings</h3>
+                            {!isEditingSource ? (
+                                <button
+                                    onClick={() => {
+                                        setSourceForm({
+                                            source_timezone: station.source_timezone || 'Africa/Lagos',
+                                            collection_start_at: station.collection_start_at ? station.collection_start_at.slice(0, 16) : ''
+                                        });
+                                        setIsEditingSource(true);
+                                    }}
+                                    style={{ padding: '6px 12px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                                >
+                                    Edit Collection Settings
+                                </button>
+                            ) : (
+                                <button onClick={() => setIsEditingSource(false)} style={{ padding: '6px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+                        {isEditingSource ? (
+                            <form onSubmit={handleSourceSubmit} style={{ marginTop: '16px' }}>
+                                {sourceError && <div style={{ color: '#b91c1c', marginBottom: '12px' }}>{sourceError}</div>}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '4px' }}>IANA Timezone</label>
+                                        <input value={sourceForm.source_timezone} onChange={event => setSourceForm({...sourceForm, source_timezone: event.target.value})} placeholder="Africa/Lagos" style={{ width: '100%', padding: '8px' }} />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '4px' }}>Initial Collection Date</label>
+                                        <input type="datetime-local" value={sourceForm.collection_start_at} onChange={event => setSourceForm({...sourceForm, collection_start_at: event.target.value})} style={{ width: '100%', padding: '8px' }} />
+                                    </div>
+                                </div>
+                                <button type="submit" disabled={savingSource} style={{ marginTop: '16px', padding: '8px 16px', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px' }}>
+                                    {savingSource ? 'Saving…' : 'Save Collection Settings'}
+                                </button>
+                            </form>
+                        ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: '16px' }}>
+                                <div><span style={{ color: '#6b7280' }}>Source station ID:</span><div>{station.source_station_id || '—'}</div></div>
+                                <div><span style={{ color: '#6b7280' }}>Timezone:</span><div>{station.source_timezone || 'Africa/Lagos'}</div></div>
+                                <div><span style={{ color: '#6b7280' }}>Initial collection:</span><div>{station.collection_start_at ? new Date(station.collection_start_at).toLocaleString() : 'Latest available hour'}</div></div>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* WIGOS Settings Card */}
                 <div className={styles.chartCard} style={{ gridColumn: '1 / -1' }}>
@@ -950,7 +1198,7 @@ const StationDetails = () => {
                                     <td>{reading.wind_gust ?? '-'}</td>
                                     <td>{reading.wind_direction ?? '-'}</td>
                                     <td>{reading.precipitation ?? '-'}</td>
-                                    <td>{reading.solar_radiation ?? '-'}</td>
+                                    <td>{reading.solar_radiation == null ? '-' : Math.round(Number(reading.solar_radiation))}</td>
                                     <td>{reading.atmospheric_pressure ?? '-'}</td>
                                     <td>{reading.soil_temperature ?? '-'}</td>
                                     <td>{reading.volumetric_water_content ? Number(reading.volumetric_water_content).toFixed(2) : '-'}</td>

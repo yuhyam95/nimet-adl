@@ -97,8 +97,9 @@
 
 .cardHeader {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
 }
 
 .cardTitle {
@@ -106,8 +107,40 @@
     font-weight: 600;
     color: #111827;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
+    min-width: 0;
+}
+
+.cardTitle > svg {
+    flex: 0 0 auto;
+    margin-top: 3px;
+}
+
+.cardIdentity {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.stationName {
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.stationMeta {
+    font-size: 0.72rem;
+    color: #6b7280;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.statusRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
 }
 
 .statusBadge {
@@ -118,6 +151,7 @@
     padding: 4px 10px;
     border-radius: 9999px;
     font-weight: 500;
+    flex: 0 0 auto;
 }
 
 .statusActive {
@@ -203,6 +237,41 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+.searchGroup {
+    flex: 1 1 320px;
+}
+
+.searchWrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.searchWrapper svg {
+    position: absolute;
+    left: 12px;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.searchInput {
+    width: 100%;
+    min-width: 240px;
+    padding: 8px 12px 8px 38px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background-color: white;
+    font-size: 0.875rem;
+    color: var(--text-main);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.searchInput:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(33, 64, 30, 0.1);
 }
 
 .filterLabel {

@@ -83,6 +83,12 @@ const MappingManager = () => {
                     >
                         CLIMDES Mappings
                     </button>
+                    <button
+                        className={selectedProvider === 'PULSOWEB' ? styles.activeTab : styles.tab}
+                        onClick={() => setSelectedProvider('PULSOWEB')}
+                    >
+                        PulsoWeb Mappings
+                    </button>
                 </div>
                 
                 <button className={styles.addBtn} onClick={() => setIsAdding(true)}>

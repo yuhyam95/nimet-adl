@@ -4,9 +4,10 @@
   "description": "Backend for NiMet Automated Data Loader",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test",
     "start": "node src/server.js",
-    "sync": "node src/index.js"
+    "sync": "node src/index.js",
+    "reset-password": "node src/db/reset_password.js"
   },
   "author": "Yusuf Habu",
   "license": "ISC",
