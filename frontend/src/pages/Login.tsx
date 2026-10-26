@@ -1,19 +1,21 @@
 import React from 'react';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { User, Lock, AlertCircle } from 'lucide-react';
+import { User, Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import styles from './Login.module.css';
 import nimetLogo from '../assets/nimet-logo.png';
 
 const Login = () => {
     const [username, setUsername] = React.useState('');
     const [password, setPassword] = React.useState('');
+    const [showPassword, setShowPassword] = React.useState(false);
     const [error, setError] = React.useState('');
     const [loading, setLoading] = React.useState(false);
     
     const { login } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -24,10 +26,12 @@ const Login = () => {
             const response = await axios.post('/api/auth/login', { username, password });
             if (response.data.success) {
                 login(response.data.token, response.data.user);
-                navigate('/');
+                const destination = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
+                navigate(destination, { replace: true });
             }
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Failed to login. Please check your credentials.');
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.message : null;
+            setError(message || 'Failed to login. Please check your credentials.');
         } finally {
             setLoading(false);
         }
@@ -44,7 +48,7 @@ const Login = () => {
                     <p>Automated Data Loader System</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className={styles.form}>
+                <form onSubmit={handleSubmit} className={styles.form} autoComplete="on">
                     {error && (
                         <div className={styles.errorAlert}>
                             <AlertCircle size={20} />
@@ -58,7 +62,11 @@ const Login = () => {
                             <User size={18} />
                             <input
                                 id="username"
+                                name="username"
                                 type="text"
+                                autoComplete="username"
+                                autoCapitalize="none"
+                                spellCheck={false}
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
                                 placeholder="Enter your username"
@@ -69,16 +77,27 @@ const Login = () => {
 
                     <div className={styles.formGroup}>
                         <label htmlFor="password">Password</label>
-                        <div className={styles.inputWrapper}>
+                        <div className={`${styles.inputWrapper} ${styles.passwordField}`}>
                             <Lock size={18} />
                             <input
                                 id="password"
-                                type="password"
+                                name="password"
+                                type={showPassword ? 'text' : 'password'}
+                                autoComplete="current-password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="Enter your password"
                                 required
                             />
+                            <button
+                                type="button"
+                                className={styles.passwordToggle}
+                                onClick={() => setShowPassword((visible) => !visible)}
+                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                aria-pressed={showPassword}
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
                         </div>
                     </div>
 

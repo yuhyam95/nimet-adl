@@ -1,5 +1,6 @@
 const axios = require('axios');
 const config = require('../config/index.js');
+const { applyConversionFormula, normalizeInternalField } = require('../utils/variableMappings.js');
 
 module.exports = {
     fetchDataLoggers: async () => {
@@ -118,20 +119,12 @@ module.exports = {
                 }
 
                 const mapping = mappings[variable];
-                const internalField = mapping ? mapping.field : variable;
+                const internalField = normalizeInternalField(mapping ? mapping.field : variable);
 
                 let finalValue = value;
                 if (mapping && mapping.formula) {
                     try {
-                        // Simple and safe evaluation for "x / 1000" style formulas
-                        if (mapping.formula === 'x / 1000') {
-                            finalValue = value / 1000;
-                        } else if (mapping.formula.includes('x')) {
-                            // Basic support for other simple formulas if needed
-                            // Note: In a production environment, use a proper math parser
-                            const formula = mapping.formula.replace(/x/g, value);
-                            finalValue = eval(formula);
-                        }
+                        finalValue = applyConversionFormula(value, mapping.formula);
                     } catch (e) {
                         console.error(`Error applying formula ${mapping.formula} to value ${value}:`, e.message);
                     }

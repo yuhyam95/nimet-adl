@@ -1,5 +1,6 @@
 const axios = require('axios');
 const config = require('../config/index.js');
+const { applyConversionFormula, normalizeInternalField } = require('../utils/variableMappings.js');
 
 module.exports = {
     fetchDataLoggers: async () => {
@@ -91,17 +92,14 @@ module.exports = {
                     if (key === 'timestamp') return;
 
                     const mapping = mappings[key];
-                    const internalField = mapping ? mapping.field : key;
+                    const internalField = normalizeInternalField(mapping ? mapping.field : key);
 
                     let finalValue = value;
                     if (mapping && mapping.formula) {
                         try {
-                            if (mapping.formula.includes('x')) {
-                                const formula = mapping.formula.replace(/x/g, value);
-                                finalValue = eval(formula);
-                            }
+                            finalValue = applyConversionFormula(value, mapping.formula);
                         } catch (e) {
-                            // console.error(`Error applying formula ${mapping.formula} to ${key}:`, e.message);
+                            console.error(`Error applying formula ${mapping.formula} to ${key}:`, e.message);
                         }
                     }
                     mapped[internalField] = finalValue;

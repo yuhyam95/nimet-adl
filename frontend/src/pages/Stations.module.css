@@ -31,6 +31,41 @@
     gap: 4px;
 }
 
+.searchGroup {
+    flex: 1 1 320px;
+}
+
+.searchWrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.searchWrapper svg {
+    position: absolute;
+    left: 12px;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.searchInput {
+    width: 100%;
+    min-width: 240px;
+    padding: 8px 12px 8px 38px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background-color: white;
+    font-size: 0.875rem;
+    color: var(--text-main);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.searchInput:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(33, 64, 30, 0.1);
+}
+
 .filterLabel {
     font-size: 0.75rem;
     font-weight: 600;

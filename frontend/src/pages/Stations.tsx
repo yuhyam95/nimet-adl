@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import { Map as MapIcon, Table as TableIcon, Plus as PlusIcon, ShieldCheck, AlertTriangle, FileSpreadsheet, Maximize2, Minimize2 } from 'lucide-react';
+import { Map as MapIcon, Table as TableIcon, Plus as PlusIcon, ShieldCheck, AlertTriangle, Maximize2, Minimize2, Search } from 'lucide-react';
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -25,12 +25,14 @@ L.Marker.prototype.options.icon = DefaultIcon;
 interface Station {
     station_id: string;
     station_name: string;
-    latitude: number;
-    longitude: number;
+    latitude: number | null;
+    longitude: number | null;
     organization?: string;
     last_reading_at: string;
     is_active: boolean;
     provider: string;
+    state?: string;
+    lga?: string;
     avg_interval_seconds?: number | null;
     readings_count_24h?: number;
     reporting_frequency_minutes?: number | null;
@@ -43,6 +45,7 @@ const Stations = () => {
     const [filterProvider, setFilterProvider] = useState<string>('all');
     const [filterStatus, setFilterStatus] = useState<string>('all');
     const [filterTransmission, setFilterTransmission] = useState<string>('all');
+    const [searchTerm, setSearchTerm] = useState('');
     const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
     useEffect(() => {
@@ -86,6 +89,15 @@ const Stations = () => {
     });
 
     const filteredStations = stations.filter((station: Station) => {
+        const normalizedSearch = searchTerm.trim().toLowerCase();
+        const matchesSearch = !normalizedSearch || [
+            station.station_name,
+            station.station_id,
+            station.provider,
+            station.organization,
+            station.state,
+            station.lga
+        ].some(value => String(value || '').toLowerCase().includes(normalizedSearch));
         const matchesProvider = filterProvider === 'all' || station.provider === filterProvider;
         const matchesStatus = filterStatus === 'all' || (filterStatus === 'active' ? station.is_active : !station.is_active);
 
@@ -94,13 +106,24 @@ const Stations = () => {
         const matchesTransmission = filterTransmission === 'all' ||
             (filterTransmission === 'transmitting' ? isTransmitting : !isTransmitting);
 
-        return matchesProvider && matchesStatus && matchesTransmission;
+        return matchesSearch && matchesProvider && matchesStatus && matchesTransmission;
     }).sort((a: Station, b: Station) => (a.station_name || '').localeCompare(b.station_name || ''));
+
+    const stationsWithCoordinates = stations.filter((station: Station) =>
+        station.latitude !== null && station.latitude !== undefined &&
+        station.longitude !== null && station.longitude !== undefined &&
+        Number.isFinite(Number(station.latitude)) && Number.isFinite(Number(station.longitude))
+    ).length;
 
     // Calculate center based on filtered stations, default to Nigeria roughly
     const defaultCenter: [number, number] = [9.0820, 8.6753];
-    const mapCenter: [number, number] = filteredStations.length > 0
-        ? [filteredStations[0].latitude, filteredStations[0].longitude]
+    const firstMappableStation = filteredStations.find((station: Station) =>
+        station.latitude !== null && station.latitude !== undefined &&
+        station.longitude !== null && station.longitude !== undefined &&
+        Number.isFinite(Number(station.latitude)) && Number.isFinite(Number(station.longitude))
+    );
+    const mapCenter: [number, number] = firstMappableStation
+        ? [Number(firstMappableStation.latitude), Number(firstMappableStation.longitude)]
         : defaultCenter;
 
     if (isLoading) {
@@ -231,17 +254,35 @@ const Stations = () => {
                 </div>
                 <div className={styles.statCard}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <h3>CSV Exports</h3>
-                        <FileSpreadsheet size={18} color="#2563eb" />
+                        <h3>Location Coverage</h3>
+                        <MapIcon size={18} color="#2563eb" />
                     </div>
                     <div className={styles.healthValue}>
-                        {health?.lastExport?.time ? new Date(health.lastExport.time).toLocaleTimeString() : 'Waiting...'}
+                        {stationsWithCoordinates}/{stations.length}
                     </div>
-                    <p className={styles.healthLabel}>Last CSV Dump</p>
+                    <p className={styles.healthLabel}>
+                        {stations.length === stationsWithCoordinates
+                            ? 'All stations can be mapped'
+                            : `${stations.length - stationsWithCoordinates} station${stations.length - stationsWithCoordinates === 1 ? '' : 's'} need coordinates`}
+                    </p>
                 </div>
             </div>
 
             <div className={styles.filters}>
+                <div className={`${styles.filterGroup} ${styles.searchGroup}`}>
+                    <label className={styles.filterLabel} htmlFor="station-search">Search stations</label>
+                    <div className={styles.searchWrapper}>
+                        <Search size={16} aria-hidden="true" />
+                        <input
+                            id="station-search"
+                            type="search"
+                            className={styles.searchInput}
+                            value={searchTerm}
+                            onChange={(event) => setSearchTerm(event.target.value)}
+                            placeholder="Name, ID, provider or organization"
+                        />
+                    </div>
+                </div>
                 <div className={styles.filterGroup}>
                     <label className={styles.filterLabel} htmlFor="provider-filter">Provider</label>
                     <select
@@ -294,6 +335,7 @@ const Stations = () => {
                                 <th>Station Name</th>
                                 <th>Provider</th>
                                 <th>Coordinates</th>
+                                <th>State / LGA</th>
                                 <th>Organization</th>
                                 <th>Latest Reading</th>
                                 <th>Functional Status</th>
@@ -318,7 +360,8 @@ const Stations = () => {
                                                 {station.provider}
                                             </span>
                                         </td>
-                                        <td>{station.latitude}, {station.longitude}</td>
+                                        <td>{station.latitude != null && station.longitude != null ? `${station.latitude}, ${station.longitude}` : 'Not provided'}</td>
+                                        <td>{[station.state, station.lga].filter(Boolean).join(' / ') || '-'}</td>
                                         <td>{station.organization || '-'}</td>
                                         <td className={styles.lastUpdate}>
                                             {lastUpdate ? lastUpdate.toLocaleString() : 'Never'}
@@ -350,7 +393,7 @@ const Stations = () => {
                             })}
                             {filteredStations.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                                    <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                                         No stations match the selected filters.
                                     </td>
                                 </tr>
@@ -395,9 +438,11 @@ const Stations = () => {
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         />
                         {filteredStations.map((station: Station) => {
+                            if (station.latitude === null || station.latitude === undefined ||
+                                station.longitude === null || station.longitude === undefined) return null;
                             const lat = Number(station.latitude);
                             const lng = Number(station.longitude);
-                            if (isNaN(lat) || isNaN(lng)) return null;
+                            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
                             const lastUpdate = station.last_reading_at ? new Date(station.last_reading_at) : null;
                             const isActive = station.is_active;

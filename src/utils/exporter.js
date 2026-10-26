@@ -4,10 +4,25 @@ const db = require('../db/index.js');
 const config = require('../config/index.js');
 
 /**
+ * Exporting is opt-in and is never allowed in production.
+ * Requiring an explicit flag makes a missing or misspelled environment value
+ * fail closed instead of enabling exports by accident.
+ */
+function isExportEnabled() {
+    return process.env.ENABLE_EXPORTS === 'true' && process.env.NODE_ENV !== 'production';
+}
+
+/**
  * Generates a CSV file for each station and dumps the readings into the exports folder.
  * @returns {Promise<{success: boolean, count: number, directory: string}>}
  */
 async function exportAllStationsToCSV() {
+    if (!isExportEnabled()) {
+        const error = new Error('Export functionality is disabled in this environment.');
+        error.code = 'EXPORTS_DISABLED';
+        throw error;
+    }
+
     const exportsDir = config.exportPath;
     
     // Create exports directory if it doesn't exist
@@ -105,4 +120,4 @@ async function exportAllStationsToCSV() {
     }
 }
 
-module.exports = { exportAllStationsToCSV };
+module.exports = { exportAllStationsToCSV, isExportEnabled };

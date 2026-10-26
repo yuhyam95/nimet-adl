@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Settings, Server, Database, Shield, CheckCircle, AlertCircle, RefreshCw, Edit2, Save, X } from 'lucide-react';
 import { Skeleton } from '../components/ui/Skeleton';
 import MappingManager from '../components/MappingManager';
+import PulsoWebMetadataExplorer from '../components/PulsoWebMetadataExplorer';
 import styles from './Configuration.module.css';
 
 
@@ -11,17 +12,17 @@ import styles from './Configuration.module.css';
 const Configuration = () => {
     const [editing, setEditing] = React.useState<string | null>(null);
     const [formData, setFormData] = React.useState<any>({});
-    const [systemData, setSystemData] = React.useState<any>({});
     const [saving, setSaving] = React.useState(false);
     const [syncDates, setSyncDates] = React.useState<any>({});
     const [syncing, setSyncing] = React.useState<string | null>(null);
+    const [testingProvider, setTestingProvider] = React.useState<string | null>(null);
+    const [importingStations, setImportingStations] = React.useState<string | null>(null);
 
     const { data, isLoading, isError, error, refetch } = useQuery({
         queryKey: ['config'],
         queryFn: async () => {
             const res = await axios.get('/api/config');
             if (res.data.success) {
-                setSystemData({ exportPath: res.data.data.exportPath });
                 return res.data.data;
             }
             return null;
@@ -29,6 +30,30 @@ const Configuration = () => {
     });
 
     const providers = data?.providers || [];
+
+    const { data: networkStations = [] } = useQuery({
+        queryKey: ['stations', 'configuration-readiness'],
+        queryFn: async () => {
+            const response = await axios.get('/api/dataloggers');
+            return response.data.success ? response.data.data : [];
+        }
+    });
+
+    const networkReadiness = React.useMemo(() => {
+        const total = networkStations.length;
+        const withCoordinates = networkStations.filter((station: any) =>
+            station.latitude != null && station.longitude != null &&
+            Number.isFinite(Number(station.latitude)) && Number.isFinite(Number(station.longitude))
+        ).length;
+        const withWigos = networkStations.filter((station: any) => Boolean(station.wigos_id)).length;
+        const sharingToWis2box = networkStations.filter((station: any) => station.share_to_wis2box).length;
+        const transmitting = networkStations.filter((station: any) => {
+            if (!station.last_reading_at) return false;
+            return Date.now() - new Date(station.last_reading_at).getTime() <= 24 * 60 * 60 * 1000;
+        }).length;
+
+        return { total, withCoordinates, withWigos, sharingToWis2box, transmitting };
+    }, [networkStations]);
 
     if (isError) {
         return (
@@ -57,6 +82,12 @@ const Configuration = () => {
                 ftpUser: provider.ftpUser || '',
                 ftpPassword: ''
             });
+        } else if (provider.name === 'PULSOWEB') {
+            setFormData({
+                baseUrl: provider.baseUrl || 'https://app.pulsonic.com/rest',
+                apiToken: '',
+                defaultTimezone: provider.defaultTimezone || 'Africa/Lagos'
+            });
         } else {
             const currentUsername = provider.username || provider.apiKey || '';
             setFormData({
@@ -66,6 +97,32 @@ const Configuration = () => {
                 password: '',
                 apiSecret: ''
             });
+        }
+    };
+
+    const handleTestProvider = async (providerName: string) => {
+        setTestingProvider(providerName);
+        try {
+            const res = await axios.post(`/api/providers/${providerName.toLowerCase()}/test`);
+            alert(res.data.message || `${providerName} connection succeeded.`);
+        } catch (error: unknown) {
+            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
+            alert(message || `${providerName} connection failed.`);
+        } finally {
+            setTestingProvider(null);
+        }
+    };
+
+    const handleImportProviderStations = async (providerName: string) => {
+        setImportingStations(providerName);
+        try {
+            const response = await axios.post(`/api/providers/${providerName.toLowerCase()}/import-stations`);
+            alert(response.data.message || `${providerName} stations imported successfully.`);
+        } catch (error: unknown) {
+            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
+            alert(message || `Failed to import ${providerName} stations.`);
+        } finally {
+            setImportingStations(null);
         }
     };
 
@@ -84,25 +141,6 @@ const Configuration = () => {
         } catch (error) {
             console.error('Failed to save config:', error);
             alert('Failed to save configuration.');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleSaveSystem = async () => {
-        setSaving(true);
-        try {
-            const res = await axios.post('/api/config', {
-                system: systemData
-            });
-            if (res.data.success) {
-                alert('System settings updated successfully!');
-                setEditing(null);
-                refetch();
-            }
-        } catch (error) {
-            console.error('Failed to save system settings:', error);
-            alert('Failed to save system settings.');
         } finally {
             setSaving(false);
         }
@@ -280,6 +318,27 @@ const Configuration = () => {
                                                         />
                                                     </div>
                                                 </>
+                                            ) : provider.name === 'PULSOWEB' ? (
+                                                <>
+                                                    <div className={styles.formGroup}>
+                                                        <label>API Token</label>
+                                                        <input
+                                                            type="password"
+                                                            placeholder="Enter new PulsoWeb API token"
+                                                            value={formData.apiToken || ''}
+                                                            onChange={e => setFormData({...formData, apiToken: e.target.value})}
+                                                        />
+                                                    </div>
+                                                    <div className={styles.formGroup}>
+                                                        <label>Default Station Timezone</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Africa/Lagos"
+                                                            value={formData.defaultTimezone || ''}
+                                                            onChange={e => setFormData({...formData, defaultTimezone: e.target.value})}
+                                                        />
+                                                    </div>
+                                                </>
                                             ) : (
                                                 <>
                                                     <div className={styles.formGroup}>
@@ -326,6 +385,21 @@ const Configuration = () => {
                                                         <span className={styles.value}>{provider.ftpUser || 'None'}</span>
                                                     </div>
                                                 </>
+                                            ) : provider.name === 'PULSOWEB' ? (
+                                                <>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>Base URL</span>
+                                                        <span className={styles.value}>{provider.baseUrl || 'None'}</span>
+                                                    </div>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>API Token</span>
+                                                        <span className={styles.value}>{provider.apiToken || 'None'}</span>
+                                                    </div>
+                                                    <div className={styles.infoRow}>
+                                                        <span className={styles.label}>Default Timezone</span>
+                                                        <span className={styles.value}>{provider.defaultTimezone || 'Africa/Lagos'}</span>
+                                                    </div>
+                                                </>
                                             ) : (
                                                 <>
                                                     <div className={styles.infoRow}>
@@ -343,6 +417,34 @@ const Configuration = () => {
 
                                     {provider.isActive && (
                                         <div className={styles.syncBox}>
+                                            {provider.name !== 'WAGTECH' && (
+                                                <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
+                                                    {provider.name === 'PULSOWEB' && (
+                                                        <button
+                                                            className={styles.syncBtn}
+                                                            onClick={() => handleTestProvider(provider.name)}
+                                                            disabled={testingProvider === provider.name}
+                                                        >
+                                                            {testingProvider === provider.name ? 'Testing PulsoWeb...' : 'Test PulsoWeb Connection'}
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        className={styles.syncBtn}
+                                                        onClick={() => handleImportProviderStations(provider.name)}
+                                                        disabled={importingStations !== null}
+                                                    >
+                                                        {importingStations === provider.name ? 'Importing & Detecting Locations...' : 'Import Stations & Detect Locations'}
+                                                    </button>
+                                                    <p style={{ color: '#6b7280', fontSize: '0.75rem', margin: 0 }}>
+                                                        Missing State/LGA values are detected from coordinates through OpenStreetMap Nominatim and cached locally.
+                                                    </p>
+                                                </div>
+                                            )}
+                                            {provider.name === 'WAGTECH' && (
+                                                <p style={{ color: '#6b7280', fontSize: '0.75rem', margin: '0 0 16px' }}>
+                                                    WAGTECH stations are discovered from FTP files. State/LGA is detected automatically after real coordinates are saved on the station page.
+                                                </p>
+                                            )}
                                             <h4>Manual Data Sync</h4>
                                             <div className={styles.syncDates}>
                                                 <div className={styles.syncDateGroup}>
@@ -404,56 +506,48 @@ const Configuration = () => {
 
             <div className={styles.section}>
                 <div className={styles.sectionHeader}>
+                    <Database size={20} />
+                    <h2>PulsoWeb Metadata Explorer</h2>
+                </div>
+                <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '14px' }}>
+                    Browse live granularities, observation codes, units, and the stations reporting each observation.
+                </p>
+                <PulsoWebMetadataExplorer enabled={Boolean(providers.find((provider: { name: string; isActive: boolean }) => provider.name === 'PULSOWEB')?.isActive)} />
+            </div>
+
+            <div className={styles.section}>
+                <div className={styles.sectionHeader}>
                     <Settings size={20} />
-                    <h2>System Settings</h2>
+                    <h2>Network Readiness</h2>
                 </div>
                 <div className={styles.card}>
                     <div className={styles.cardHeader}>
                         <div className={styles.providerLogo}>
                             <Database size={24} />
-                            <h3>Export Configuration</h3>
+                            <h3>Station Metadata & Delivery</h3>
                         </div>
-                        {editing !== 'system' && (
-                            <button onClick={() => setEditing('system')} className={styles.editBtn}>
-                                <Edit2 size={14} />
-                            </button>
-                        )}
                     </div>
                     <div className={styles.cardBody}>
-                        {editing === 'system' ? (
-                            <div className={styles.editForm}>
-                                <div className={styles.formGroup}>
-                                    <label>CSV Export Directory Path</label>
-                                    <input 
-                                        type="text" 
-                                        placeholder="/absolute/path/to/exports"
-                                        value={systemData.exportPath} 
-                                        onChange={e => setSystemData({...systemData, exportPath: e.target.value})}
-                                    />
-                                    <p className={styles.helperText} style={{ marginTop: '8px' }}>
-                                        Absolute path where CSV files will be dumped periodically. 
-                                        If left empty, a default 'exports' folder in the project root will be used.
-                                    </p>
-                                </div>
-                                <div className={styles.formActions}>
-                                    <button onClick={() => setEditing(null)} className={styles.cancelBtn}>
-                                        <X size={14} /> Cancel
-                                    </button>
-                                    <button onClick={handleSaveSystem} disabled={saving} className={styles.saveBtn}>
-                                        <Save size={14} /> {saving ? 'Saving...' : 'Save Settings'}
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className={styles.infoRow}>
-                                <span className={styles.label}>Export Directory</span>
-                                <span className={styles.value}>{data?.exportPath || 'Default (project root/exports)'}</span>
-                            </div>
-                        )}
+                        <div className={styles.infoRow}>
+                            <span className={styles.label}>Coordinates configured</span>
+                            <span className={styles.value}>{networkReadiness.withCoordinates} / {networkReadiness.total}</span>
+                        </div>
+                        <div className={styles.infoRow}>
+                            <span className={styles.label}>Transmitting in the last 24 hours</span>
+                            <span className={styles.value}>{networkReadiness.transmitting} / {networkReadiness.total}</span>
+                        </div>
+                        <div className={styles.infoRow}>
+                            <span className={styles.label}>WIGOS identifiers assigned</span>
+                            <span className={styles.value}>{networkReadiness.withWigos} / {networkReadiness.total}</span>
+                        </div>
+                        <div className={styles.infoRow}>
+                            <span className={styles.label}>Sharing to WIS2BOX</span>
+                            <span className={styles.value}>{networkReadiness.sharingToWis2box} / {networkReadiness.total}</span>
+                        </div>
                     </div>
                     <div className={styles.cardFooter}>
                         <p className={styles.helperText}>
-                            CSV files for all stations are automatically generated and updated every 15 minutes.
+                            Complete missing station metadata from the Stations page before enabling WIS2BOX delivery.
                         </p>
                     </div>
                 </div>

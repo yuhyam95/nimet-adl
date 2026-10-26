@@ -84,7 +84,7 @@
     align-items: center;
 }
 
-.inputWrapper svg {
+.inputWrapper > svg {
     position: absolute;
     left: 12px;
     color: var(--text-muted);
@@ -100,6 +100,40 @@
     outline: none;
     background: var(--surface);
     color: var(--text-main);
+}
+
+.passwordField input {
+    padding-right: 44px;
+}
+
+.passwordToggle {
+    position: absolute;
+    right: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.passwordToggle:hover {
+    color: var(--text-main);
+    background: var(--bg-main);
+}
+
+.passwordToggle:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+.passwordToggle svg {
+    position: static;
 }
 
 .inputWrapper input:focus {

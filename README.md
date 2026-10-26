@@ -50,6 +50,16 @@ API_WEATHER_ENDPOINT=/weather/data
     npm start
     ```
 
+### Reset a user password
+
+Run the password reset command with the exact username:
+
+```bash
+npm run reset-password -- admin
+```
+
+The command prompts for the new password twice without placing it in your terminal history.
+
 ## Dashboard
 
 A React/Vite dashboard is included in the `frontend` directory to visualize the weather data.
@@ -74,4 +84,35 @@ To run the dashboard:
 
 -   **Database Schema**: Modify `src/index.js` and `src/db/index.js` to match your actual database schema.
 -   **API logic**: Adjust `src/services/api.js` if the authentication mechanism differs.
+
+## PulsoWeb / Pulsonic provider
+
+Pulsonic stations can be discovered and synchronized through the PulsoWeb REST API. Configure:
+
+```env
+PULSOWEB_API_BASE_URL=https://app.pulsonic.com/rest
+PULSOWEB_API_TOKEN=replace-with-your-token
+PULSOWEB_DEFAULT_TIMEZONE=Africa/Lagos
+```
+
+After restarting the backend:
+
+1. Open **Configuration → Data Providers** and test the PulsoWeb connection.
+2. Select **Import Stations & Detect Locations** on the PulsoWeb provider card to add or refresh every station available to the configured token.
+3. Use the **PulsoWeb Metadata Explorer** to identify the granularity, observation codes, and units published by the stations.
+4. Add mappings under **PulsoWeb Mappings**. Map each numeric observation code to an application field such as `airTemperature`, `relativeHumidity`, `windSpeed`, `windDirection`, `precipitation`, `solarRadiation`, or `atmosphericPressure`.
+5. Run a manual PulsoWeb synchronization for the desired initial date range. Subsequent scheduled runs resume from the latest saved reading with a small overlap.
+
+PulsoWeb station IDs are stored internally with a `PULSOWEB:` prefix to prevent collisions with other providers. The original numeric code is retained in `source_station_id`. Because PulsoWeb may not supply coordinates, imported stations can initially appear without a map until their coordinates are added.
+
+## Station location detection
+
+CLIMDES, TAHMO, and PulsoWeb provider cards include **Import Stations & Detect Locations**. Provider imports and data synchronizations automatically detect missing State/LGA values when station coordinates are available. WAGTECH stations are discovered from FTP files; because that feed does not supply trustworthy coordinates, detection occurs after an administrator saves the station's real latitude and longitude. Detection uses the OpenStreetMap Nominatim reverse-geocoding service and stores the result locally. Optional configuration:
+
+```env
+GEOCODING_BASE_URL=https://nominatim.openstreetmap.org
+GEOCODING_USER_AGENT=NiMet-ADL/1.0 (station administration)
+```
+
+Use a self-hosted or approved provider URL for higher-volume deployments. The public OpenStreetMap service is limited to one request per second and requires attribution.
 
