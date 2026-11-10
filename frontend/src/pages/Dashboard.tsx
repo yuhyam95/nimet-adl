@@ -25,6 +25,7 @@ import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import { Skeleton } from '../components/ui/Skeleton';
+import { MAP_TILE_ATTRIBUTION, MAP_TILE_URL } from '../config/mapTiles';
 import styles from './Dashboard.module.css';
 
 // Fix for Leaflet default marker icon in Vite/React
@@ -564,8 +565,8 @@ const Dashboard = () => {
                             style={{ height: '100%', width: '100%' }}
                         >
                             <TileLayer
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                attribution={MAP_TILE_ATTRIBUTION}
+                                url={MAP_TILE_URL}
                             />
                             {filteredStations.map((station: Station) => {
                                 if (station.latitude === null || station.latitude === undefined ||

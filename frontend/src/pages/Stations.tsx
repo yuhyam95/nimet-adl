@@ -7,6 +7,7 @@ import { Map as MapIcon, Table as TableIcon, Plus as PlusIcon, ShieldCheck, Aler
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
+import { MAP_TILE_ATTRIBUTION, MAP_TILE_URL } from '../config/mapTiles';
 import styles from './Stations.module.css';
 
 // Fix for Leaflet default marker icon in Vite/React
@@ -585,8 +586,8 @@ const Stations = () => {
                         style={{ height: '100%', width: '100%' }}
                     >
                         <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            attribution={MAP_TILE_ATTRIBUTION}
+                            url={MAP_TILE_URL}
                         />
                         {filteredStations.map((station: Station) => {
                             if (station.latitude === null || station.latitude === undefined ||

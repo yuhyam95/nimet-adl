@@ -19,6 +19,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useAuth } from '../context/AuthContext';
+import { MAP_TILE_ATTRIBUTION, MAP_TILE_URL } from '../config/mapTiles';
 import styles from './StationDetails.module.css';
 
 // Fix for Leaflet default marker icon in Vite/React
@@ -703,8 +704,8 @@ const StationDetails = () => {
                                     style={{ height: '100%', width: '100%' }}
                                 >
                                     <TileLayer
-                                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                        attribution={MAP_TILE_ATTRIBUTION}
+                                        url={MAP_TILE_URL}
                                     />
                                     <Marker position={[Number(station.latitude), Number(station.longitude)]}>
                                         <Popup>
