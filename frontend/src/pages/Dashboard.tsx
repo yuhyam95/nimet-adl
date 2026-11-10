@@ -364,7 +364,7 @@ const Dashboard = () => {
 
                             return (
                                 <Link
-                                    to={`/stations/${station.station_id}`}
+                                    to={`/stations/${encodeURIComponent(station.station_id)}`}
                                     key={station.station_id}
                                     className={styles.stationCard}
                                 >
@@ -479,7 +479,7 @@ const Dashboard = () => {
                                     return (
                                         <tr key={station.station_id}>
                                             <td>
-                                                <Link to={`/stations/${station.station_id}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
+                                                <Link to={`/stations/${encodeURIComponent(station.station_id)}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
                                                     {station.station_name}
                                                 </Link>
                                             </td>
@@ -604,7 +604,7 @@ const Dashboard = () => {
                                         }}
                                     >
                                         <Popup>
-                                            <Link to={`/stations/${station.station_id}`} style={{ fontWeight: 'bold', fontSize: '1.1em', textDecoration: 'none', color: '#333' }}>
+                                            <Link to={`/stations/${encodeURIComponent(station.station_id)}`} style={{ fontWeight: 'bold', fontSize: '1.1em', textDecoration: 'none', color: '#333' }}>
                                                 {station.station_name}
                                             </Link><br />
                                             Provider: {station.provider}<br />

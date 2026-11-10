@@ -18,7 +18,6 @@ const AddStation = () => {
         station_name: '',
         latitude: '',
         longitude: '',
-        provider: 'MANUAL',
         organization: '',
         wigos_id: '',
         country: 'Nigeria',
@@ -166,6 +165,8 @@ const AddStation = () => {
                                     id="station_name" 
                                     name="station_name" 
                                     className={styles.input} 
+                                    required
+                                    maxLength={255}
                                     value={formData.station_name}
                                     onChange={handleInputChange}
                                     placeholder="e.g., Abuja Central"
@@ -195,17 +196,6 @@ const AddStation = () => {
                                     value={formData.longitude}
                                     onChange={handleInputChange}
                                     placeholder="e.g., 7.3986"
-                                />
-                            </div>
-                            <div className={styles.formGroup}>
-                                <label className={styles.label} htmlFor="provider">Provider</label>
-                                <input 
-                                    type="text" 
-                                    id="provider" 
-                                    name="provider" 
-                                    className={styles.input} 
-                                    value={formData.provider}
-                                    onChange={handleInputChange}
                                 />
                             </div>
                             <div className={styles.formGroup}>
@@ -266,7 +256,7 @@ const AddStation = () => {
                             <p>Click here to select a CSV file containing station data.</p>
                             <p style={{ fontSize: '0.85rem', marginTop: '8px' }}>
                                 The CSV must contain a <strong>station_id</strong> column. Other valid columns include 
-                                station_name, latitude, longitude, provider, wigos_id, etc.
+                                station_name, latitude, longitude, wigos_id, etc. Imported rows are always marked as MANUAL.
                             </p>
                         </div>
                         {isLoading && (

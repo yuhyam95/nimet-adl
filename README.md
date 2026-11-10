@@ -116,3 +116,27 @@ GEOCODING_USER_AGENT=NiMet-ADL/1.0 (station administration)
 
 Use a self-hosted or approved provider URL for higher-volume deployments. The public OpenStreetMap service is limited to one request per second and requires attribution.
 
+## Production security
+
+Production refuses to start unless `JWT_SECRET` contains at least 32 characters. Generate a strong value with `openssl rand -hex 64` and configure the dashboard origin when cross-origin API access is required:
+
+```env
+NODE_ENV=production
+JWT_SECRET=replace-with-a-random-secret
+CORS_ALLOWED_ORIGINS=https://adl.nimet.gov.ng
+DB_CONNECTION_TIMEOUT_MS=10000
+DB_QUERY_TIMEOUT_MS=30000
+DB_STATEMENT_TIMEOUT_MS=30000
+```
+
+Manual and CSV-created stations are always assigned the `MANUAL` provider. Station IDs and names containing path traversal or control characters are rejected, and unsafe upstream/FTP station records are skipped.
+
+Administrators can select **Remove** on the Stations table to quarantine a suspicious station. Quarantine hides the station and its readings from the platform, stops future provider synchronization for it, and preserves the record for investigation. Administrative endpoints are also available to list, restore, or permanently delete quarantined stations:
+
+- `GET /api/admin/stations/quarantined`
+- `GET /api/admin/security-audit?limit=100`
+- `POST /api/admin/stations/restore` with `{ "stationId": "..." }`
+- `DELETE /api/admin/stations/permanent` with `{ "stationId": "...", "confirmation": "..." }`
+
+Permanent deletion is only allowed after quarantine and deletes associated weather readings. Security-sensitive actions are written to `security_audit_log`.
+

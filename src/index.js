@@ -6,6 +6,7 @@ const tahmoService = require('./services/tahmo.js');
 const pulsowebService = require('./services/pulsoweb.js');
 const { processFtpData } = require('./services/ftpImporter.js');
 const { reverseGeocode } = require('./services/geocoding.js');
+const { validateStationInput, validateCoordinates } = require('./utils/stationSecurity.js');
 
 const providerServices = {
     CLIMDES: climdesService,
@@ -14,11 +15,16 @@ const providerServices = {
 };
 
 async function upsertProviderStation(logger, providerName) {
-    const stationParams = [
-        logger._id,
-        logger.stationName,
+    const { stationId, stationName } = validateStationInput(logger);
+    const coordinates = validateCoordinates(
         logger.location?.coordinates?.[1],
-        logger.location?.coordinates?.[0],
+        logger.location?.coordinates?.[0]
+    );
+    const stationParams = [
+        stationId,
+        stationName,
+        coordinates.latitude,
+        coordinates.longitude,
         logger.dataLoggerModel,
         logger.location?.type,
         logger.organization?.name,
@@ -31,7 +37,7 @@ async function upsertProviderStation(logger, providerName) {
         logger.collectionStartAt || null
     ];
 
-    return db.query(`
+    const result = await db.query(`
         INSERT INTO stations (
             station_id, station_name, latitude, longitude,
             model, location_type, organization, country, last_reading_at, is_active, provider,
@@ -58,8 +64,14 @@ async function upsertProviderStation(logger, providerName) {
             source_timezone = COALESCE(stations.source_timezone, EXCLUDED.source_timezone),
             collection_start_at = COALESCE(stations.collection_start_at, EXCLUDED.collection_start_at),
             updated_at = NOW()
-        RETURNING source_timezone, collection_start_at;
+        WHERE stations.provider = EXCLUDED.provider
+        RETURNING source_timezone, collection_start_at, is_quarantined;
     `, stationParams);
+
+    if (result.rows.length === 0) {
+        throw new Error(`Station ID ${stationId} is already owned by another provider.`);
+    }
+    return result;
 }
 
 async function importProviderStations(providerName) {
@@ -72,11 +84,19 @@ async function importProviderStations(providerName) {
         throw new Error(`Failed to fetch loggers for ${normalizedProvider}`);
     }
 
+    let imported = 0;
+    const rejected = [];
     for (const logger of loggersResponse.data) {
-        await upsertProviderStation(logger, normalizedProvider);
+        try {
+            await upsertProviderStation(logger, normalizedProvider);
+            imported += 1;
+        } catch (error) {
+            rejected.push({ stationId: String(logger?._id || ''), reason: error.message });
+            console.error(`Rejected unsafe ${normalizedProvider} station metadata:`, error.message);
+        }
     }
 
-    return { count: loggersResponse.data.length, stations: loggersResponse.data };
+    return { count: imported, received: loggersResponse.data.length, rejected };
 }
 
 async function geocodeProviderStations(providerName) {
@@ -87,6 +107,7 @@ async function geocodeProviderStations(providerName) {
          WHERE provider = $1
            AND latitude IS NOT NULL
            AND longitude IS NOT NULL
+           AND COALESCE(is_quarantined, FALSE) = FALSE
            AND (state IS NULL OR lga IS NULL)
            AND geocoded_at IS NULL
          ORDER BY station_id`,
@@ -167,6 +188,10 @@ const syncData = async (shouldClosePool = false) => {
                 last_wis2box_dispatch_at TIMESTAMP,
                 last_wis2box_dispatch_status VARCHAR(50),
                 last_wis2box_dispatch_error TEXT,
+                is_quarantined BOOLEAN DEFAULT FALSE,
+                quarantine_reason TEXT,
+                quarantined_at TIMESTAMPTZ,
+                quarantined_by INTEGER,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `;
@@ -200,9 +225,78 @@ const syncData = async (shouldClosePool = false) => {
                 ADD COLUMN IF NOT EXISTS share_to_wis2box BOOLEAN DEFAULT FALSE,
                 ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_at TIMESTAMP,
                 ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_status VARCHAR(50),
-                ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_error TEXT;
+                ADD COLUMN IF NOT EXISTS last_wis2box_dispatch_error TEXT,
+                ADD COLUMN IF NOT EXISTS is_quarantined BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS quarantine_reason TEXT,
+                ADD COLUMN IF NOT EXISTS quarantined_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS quarantined_by INTEGER;
             `);
         } catch (err) { /* ignore */ }
+
+        try {
+            await db.query(`
+                CREATE TABLE IF NOT EXISTS security_audit_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    action VARCHAR(100) NOT NULL,
+                    user_id INTEGER,
+                    username VARCHAR(255),
+                    target_type VARCHAR(100),
+                    target_id VARCHAR(255),
+                    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    ip_address VARCHAR(100),
+                    user_agent TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS security_audit_log_created_at_idx
+                    ON security_audit_log (created_at DESC);
+                CREATE INDEX IF NOT EXISTS security_audit_log_target_idx
+                    ON security_audit_log (target_type, target_id);
+            `);
+        } catch (err) {
+            console.error('Could not initialize security audit log:', err.message);
+        }
+
+        try {
+            await db.query(`
+                WITH quarantined AS (
+                    UPDATE stations
+                    SET is_quarantined = TRUE,
+                        is_active = FALSE,
+                        quarantine_reason = 'Automatically quarantined: unsafe or blank station identity',
+                        quarantined_at = NOW(),
+                        quarantined_by = NULL,
+                        updated_at = NOW()
+                    WHERE COALESCE(is_quarantined, FALSE) = FALSE
+                      AND (
+                          station_id IS NULL
+                          OR station_id !~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+                          OR station_id LIKE '%..%'
+                          OR station_name IS NULL
+                          OR BTRIM(station_name) = ''
+                          OR POSITION('../' IN station_name) > 0
+                          OR POSITION('..' || CHR(92) IN station_name) > 0
+                          OR LEFT(station_name, 1) = '/'
+                          OR LEFT(station_name, 1) = CHR(92)
+                      )
+                    RETURNING station_id, station_name, provider, quarantine_reason
+                )
+                INSERT INTO security_audit_log (
+                    action, target_type, target_id, details
+                )
+                SELECT
+                    'station.auto_quarantined',
+                    'station',
+                    station_id,
+                    jsonb_build_object(
+                        'stationName', station_name,
+                        'provider', provider,
+                        'reason', quarantine_reason
+                    )
+                FROM quarantined;
+            `);
+        } catch (err) {
+            console.error('Could not auto-quarantine unsafe station records:', err.message);
+        }
 
         try {
             await db.query(`
@@ -282,6 +376,7 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                 const stationSourceTimezone = upsertedStation.rows[0]?.source_timezone || logger.sourceTimezone;
                 const stationCollectionStart = upsertedStation.rows[0]?.collection_start_at || logger.collectionStartAt;
 
+                if (upsertedStation.rows[0]?.is_quarantined) continue;
                 if (!logger.isActive) continue;
 
                 let effectiveStartDate = startDate;

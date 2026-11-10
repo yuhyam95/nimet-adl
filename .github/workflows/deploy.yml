@@ -17,17 +17,22 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            # Navigate to the project directory
+            set -Eeuo pipefail
+
             cd /root/nimet-adl
 
-            # Fetch latest changes
-            git pull origin production
+            git pull --ff-only origin production
 
-            # Update Backend dependencies and restart PM2
-            npm install --production
-            pm2 restart nimet-adl-backend
+            # Install from lockfiles so dependency failures stop the deployment.
+            npm ci --omit=dev
+            npm ci --prefix frontend
 
-            # Update Frontend dependencies and rebuild React app
-            cd frontend
-            npm install
-            npm run build
+            # Express serves this Vite build from frontend/dist.
+            npm run build --prefix frontend
+            test -s frontend/dist/index.html
+
+            # Restart only after the complete application is ready.
+            pm2 restart nimet-adl-backend --update-env
+            curl --fail --silent --show-error \
+              --retry 10 --retry-delay 2 --retry-connrefused \
+              http://127.0.0.1:4000/api/health >/dev/null

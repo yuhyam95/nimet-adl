@@ -10,12 +10,62 @@ const { importProviderStations, geocodeProviderStations, syncData, syncProviderD
 const { exportAllStationsToCSV, isExportEnabled } = require('./utils/exporter.js');
 const { hashPassword, comparePassword, generateToken } = require('./utils/auth.js');
 const { protect } = require('./middleware/auth.js');
+const { validateStationInput, validateCoordinates } = require('./utils/stationSecurity.js');
+const { recordAudit } = require('./utils/audit.js');
+const { mountFrontend } = require('./utils/frontend.js');
 
 const app = express();
 const port = process.env.PORT || 3000;
+const allowedCorsOrigins = new Set(
+    String(process.env.CORS_ALLOWED_ORIGINS || '')
+        .split(',')
+        .map(origin => origin.trim())
+        .filter(Boolean)
+);
 
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 'loopback');
+app.disable('x-powered-by');
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin || process.env.NODE_ENV !== 'production') return callback(null, true);
+        return callback(null, allowedCorsOrigins.has(origin));
+    }
+}));
+app.use(express.json({ limit: '2mb' }));
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'same-origin');
+    next();
+});
+
+const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+
+function limitLoginAttempts(req, res, next) {
+    const now = Date.now();
+    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const recent = (loginAttempts.get(key) || []).filter(timestamp => now - timestamp < LOGIN_WINDOW_MS);
+    recent.push(now);
+    loginAttempts.set(key, recent);
+
+    if (recent.length > LOGIN_MAX_ATTEMPTS) {
+        res.setHeader('Retry-After', String(Math.ceil((LOGIN_WINDOW_MS - (now - recent[0])) / 1000)));
+        return res.status(429).json({ success: false, message: 'Too many login attempts. Please try again later.' });
+    }
+    next();
+}
+
+const loginAttemptCleanup = setInterval(() => {
+    const cutoff = Date.now() - LOGIN_WINDOW_MS;
+    for (const [key, attempts] of loginAttempts.entries()) {
+        const recent = attempts.filter(timestamp => timestamp >= cutoff);
+        if (recent.length === 0) loginAttempts.delete(key);
+        else loginAttempts.set(key, recent);
+    }
+}, LOGIN_WINDOW_MS);
+loginAttemptCleanup.unref();
 
 // System state for monitoring
 let systemStatus = {
@@ -37,23 +87,25 @@ app.get('/api/weather', protect(['Admin', 'Data Manager', 'Data Viewer']), async
     try {
         const { limit = 50, stationId, startDate, endDate } = req.query;
         let queryArgs = [];
-        let conditions = [];
+        let conditions = [
+            'EXISTS (SELECT 1 FROM stations s WHERE s.station_id = weather_readings.station_id AND COALESCE(s.is_quarantined, FALSE) = FALSE)'
+        ];
 
         // Build dynamic SQL query
         let queryText = 'SELECT * FROM weather_readings';
 
         if (stationId) {
-            conditions.push(`station_id = $${conditions.length + 1}`);
+            conditions.push(`station_id = $${queryArgs.length + 1}`);
             queryArgs.push(stationId);
         }
 
         if (startDate) {
-            conditions.push(`timestamp >= $${conditions.length + 1}`);
+            conditions.push(`timestamp >= $${queryArgs.length + 1}`);
             queryArgs.push(startDate);
         }
 
         if (endDate) {
-            conditions.push(`timestamp <= $${conditions.length + 1}`);
+            conditions.push(`timestamp <= $${queryArgs.length + 1}`);
             queryArgs.push(endDate);
         }
 
@@ -62,7 +114,7 @@ app.get('/api/weather', protect(['Admin', 'Data Manager', 'Data Viewer']), async
         }
 
         // Default sorting and limit
-        queryText += ` ORDER BY timestamp DESC LIMIT $${conditions.length + 1}`;
+        queryText += ` ORDER BY timestamp DESC LIMIT $${queryArgs.length + 1}`;
         queryArgs.push(limit);
 
         const result = await db.query(queryText, queryArgs);
@@ -165,6 +217,7 @@ app.get('/api/dataloggers', protect(['Admin', 'Data Manager', 'Data Viewer']), a
           FROM weather_readings
           WHERE station_id = s.station_id AND timestamp >= NOW() - INTERVAL '24 hours'
       ) c24 ON true
+      WHERE COALESCE(s.is_quarantined, FALSE) = FALSE
       ORDER BY s.station_id;
     `;
 
@@ -217,23 +270,20 @@ app.post('/api/stations', protect(['Admin', 'Data Manager']), async (req, res) =
     try {
         const {
             station_id, station_name, latitude, longitude, model, location_type,
-            organization, country, provider, wigos_id, wsi_series, wsi_issuer,
+            organization, country, wigos_id, wsi_series, wsi_issuer,
             wsi_issue_number, wsi_local, wmo_block_number, wmo_station_number,
             station_height_above_msl, barometer_height_above_msl, anemometer_height,
             rain_sensor_height, method_of_ground_state_measurement, method_of_snow_depth_measurement,
             time_period_of_wind
         } = req.body;
 
-        if (!station_id) {
-            return res.status(400).json({ error: 'station_id is required' });
-        }
-
-        if (provider === 'CLIMDES') {
-            const latVal = parseFloat(latitude);
-            const lonVal = parseFloat(longitude);
-            if (isNaN(latVal) || isNaN(lonVal) || latVal < 4.0 || latVal > 14.0 || lonVal < 2.5 || lonVal > 15.0) {
-                return res.status(400).json({ error: 'CLIMDES station coordinates must be within Nigeria (Latitude 4.0 to 14.0, Longitude 2.5 to 15.0)' });
-            }
+        let safeStation;
+        let safeCoordinates;
+        try {
+            safeStation = validateStationInput({ station_id, station_name });
+            safeCoordinates = validateCoordinates(latitude, longitude);
+        } catch (error) {
+            return res.status(400).json({ error: error.message });
         }
 
         const query = `
@@ -271,11 +321,12 @@ app.post('/api/stations', protect(['Admin', 'Data Manager']), async (req, res) =
                 method_of_snow_depth_measurement = EXCLUDED.method_of_snow_depth_measurement,
                 time_period_of_wind = EXCLUDED.time_period_of_wind,
                 updated_at = NOW()
+            WHERE stations.provider = 'MANUAL'
             RETURNING *;
         `;
         const params = [
-            station_id, station_name, latitude, longitude, model, location_type,
-            organization, country, provider || 'MANUAL', wigos_id, wsi_series, wsi_issuer,
+            safeStation.stationId, safeStation.stationName, safeCoordinates.latitude, safeCoordinates.longitude, model, location_type,
+            organization, country, 'MANUAL', wigos_id, wsi_series, wsi_issuer,
             wsi_issue_number, wsi_local, wmo_block_number, wmo_station_number,
             station_height_above_msl, barometer_height_above_msl, anemometer_height,
             rain_sensor_height, method_of_ground_state_measurement, method_of_snow_depth_measurement,
@@ -283,6 +334,12 @@ app.post('/api/stations', protect(['Admin', 'Data Manager']), async (req, res) =
         ];
 
         const result = await db.query(query, params);
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'A provider-managed station already uses this station_id.' });
+        }
+        await recordAudit(db, req, 'station.created', 'station', safeStation.stationId, {
+            provider: 'MANUAL'
+        });
         res.status(201).json({ success: true, data: result.rows[0] });
     } catch (error) {
         console.error('Error adding station:', error);
@@ -303,15 +360,15 @@ app.post('/api/stations/bulk', protect(['Admin', 'Data Manager']), async (req, r
             await client.query('BEGIN');
 
             const results = [];
-            for (const s of stations) {
-                if (!s.station_id) continue;
-
-                if (s.provider === 'CLIMDES') {
-                    const latVal = parseFloat(s.latitude);
-                    const lonVal = parseFloat(s.longitude);
-                    if (isNaN(latVal) || isNaN(lonVal) || latVal < 4.0 || latVal > 14.0 || lonVal < 2.5 || lonVal > 15.0) {
-                        continue; // Skip CLIMDES stations outside Nigeria
-                    }
+            for (let index = 0; index < stations.length; index += 1) {
+                const s = stations[index];
+                let safeStation;
+                let safeCoordinates;
+                try {
+                    safeStation = validateStationInput(s);
+                    safeCoordinates = validateCoordinates(s.latitude, s.longitude);
+                } catch (error) {
+                    throw new Error(`CSV row ${index + 2}: ${error.message}`);
                 }
 
                 const query = `
@@ -350,14 +407,15 @@ app.post('/api/stations/bulk', protect(['Admin', 'Data Manager']), async (req, r
                         time_period_of_wind = EXCLUDED.time_period_of_wind,
                         is_active = EXCLUDED.is_active,
                         updated_at = NOW()
+                    WHERE stations.provider = 'MANUAL'
                     RETURNING *;
                 `;
 
                 const isActive = s.status === 'inactive' ? false : (s.status === 'active' ? true : (s.is_active !== undefined ? String(s.is_active).toLowerCase() === 'true' : true));
 
                 const params = [
-                    s.station_id, s.station_name, s.latitude, s.longitude, s.model, s.location_type,
-                    s.organization, s.country, s.provider || 'MANUAL', s.wigos_id, s.wsi_series, s.wsi_issuer,
+                    safeStation.stationId, safeStation.stationName, safeCoordinates.latitude, safeCoordinates.longitude, s.model, s.location_type,
+                    s.organization, s.country, 'MANUAL', s.wigos_id, s.wsi_series, s.wsi_issuer,
                     s.wsi_issue_number, s.wsi_local, s.wmo_block_number, s.wmo_station_number,
                     s.station_height_above_msl, s.barometer_height_above_msl, s.anemometer_height,
                     s.rain_sensor_height, s.method_of_ground_state_measurement, s.method_of_snow_depth_measurement,
@@ -365,10 +423,18 @@ app.post('/api/stations/bulk', protect(['Admin', 'Data Manager']), async (req, r
                 ];
 
                 const result = await client.query(query, params);
+                if (result.rows.length === 0) {
+                    throw new Error(`CSV row ${index + 2}: a provider-managed station already uses this station_id.`);
+                }
                 results.push(result.rows[0]);
             }
 
             await client.query('COMMIT');
+            await recordAudit(db, req, 'station.bulk_created', 'station', null, {
+                stationIds: results.map(station => station.station_id),
+                count: results.length,
+                provider: 'MANUAL'
+            });
             res.status(201).json({ success: true, count: results.length, data: results });
         } catch (err) {
             await client.query('ROLLBACK');
@@ -378,7 +444,9 @@ app.post('/api/stations/bulk', protect(['Admin', 'Data Manager']), async (req, r
         }
     } catch (error) {
         console.error('Error in bulk importing stations:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(error.message?.startsWith('CSV row ') ? 400 : 500).json({
+            error: error.message?.startsWith('CSV row ') ? error.message : 'Internal Server Error'
+        });
     }
 });
 
@@ -580,9 +648,151 @@ app.post('/api/stations/:stationId/geocode', protect(['Admin']), async (req, res
     }
 });
 
+app.post('/api/admin/stations/quarantine', protect(['Admin']), async (req, res) => {
+    const stationId = String(req.body?.stationId || '');
+    const reason = String(req.body?.reason || '').trim();
+    if (!stationId || stationId.length > 255) {
+        return res.status(400).json({ success: false, message: 'A valid stationId is required.' });
+    }
+    if (reason.length < 5 || reason.length > 500) {
+        return res.status(400).json({ success: false, message: 'A removal reason between 5 and 500 characters is required.' });
+    }
+
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await client.query(
+            `UPDATE stations
+             SET is_quarantined = TRUE,
+                 quarantine_reason = $1,
+                 quarantined_at = NOW(),
+                 quarantined_by = $2,
+                 is_active = FALSE,
+                 updated_at = NOW()
+             WHERE station_id = $3
+             RETURNING station_id, station_name, provider, quarantined_at`,
+            [reason, req.user.id, stationId]
+        );
+        if (result.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Station not found.' });
+        }
+        await recordAudit(client, req, 'station.quarantined', 'station', stationId, {
+            reason,
+            stationName: result.rows[0].station_name,
+            provider: result.rows[0].provider
+        });
+        await client.query('COMMIT');
+        res.json({ success: true, data: result.rows[0], message: 'Station removed from the platform and preserved in quarantine.' });
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error quarantining station:', error);
+        res.status(500).json({ success: false, message: 'Failed to quarantine station.' });
+    } finally {
+        client.release();
+    }
+});
+
+app.get('/api/admin/stations/quarantined', protect(['Admin']), async (req, res) => {
+    try {
+        const result = await db.query(
+            `SELECT station_id, station_name, provider, quarantine_reason, quarantined_at, quarantined_by
+             FROM stations
+             WHERE COALESCE(is_quarantined, FALSE) = TRUE
+             ORDER BY quarantined_at DESC`
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to load quarantined stations.' });
+    }
+});
+
+app.get('/api/admin/security-audit', protect(['Admin']), async (req, res) => {
+    try {
+        const requestedLimit = Number(req.query.limit || 100);
+        const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 100;
+        const result = await db.query(
+            `SELECT id, action, user_id, username, target_type, target_id,
+                    details, ip_address, user_agent, created_at
+             FROM security_audit_log
+             ORDER BY created_at DESC
+             LIMIT $1`,
+            [limit]
+        );
+        res.json({ success: true, data: result.rows });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to load security audit records.' });
+    }
+});
+
+app.post('/api/admin/stations/restore', protect(['Admin']), async (req, res) => {
+    const stationId = String(req.body?.stationId || '');
+    if (!stationId || stationId.length > 255) {
+        return res.status(400).json({ success: false, message: 'A valid stationId is required.' });
+    }
+    try {
+        const result = await db.query(
+            `UPDATE stations
+             SET is_quarantined = FALSE,
+                 quarantine_reason = NULL,
+                 quarantined_at = NULL,
+                 quarantined_by = NULL,
+                 updated_at = NOW()
+             WHERE station_id = $1 AND COALESCE(is_quarantined, FALSE) = TRUE
+             RETURNING station_id`,
+            [stationId]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Quarantined station not found.' });
+        }
+        await recordAudit(db, req, 'station.restored', 'station', stationId);
+        res.json({ success: true, message: 'Station restored.' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to restore station.' });
+    }
+});
+
+app.delete('/api/admin/stations/permanent', protect(['Admin']), async (req, res) => {
+    const stationId = String(req.body?.stationId || '');
+    const confirmation = String(req.body?.confirmation || '');
+    if (!stationId || confirmation !== stationId) {
+        return res.status(400).json({ success: false, message: 'Type the exact station ID to confirm permanent deletion.' });
+    }
+
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        const stationResult = await client.query(
+            `SELECT station_name, provider, quarantine_reason
+             FROM stations
+             WHERE station_id = $1 AND COALESCE(is_quarantined, FALSE) = TRUE
+             FOR UPDATE`,
+            [stationId]
+        );
+        if (stationResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Quarantine the station before permanently deleting it.' });
+        }
+        const readingsResult = await client.query('DELETE FROM weather_readings WHERE station_id = $1', [stationId]);
+        await client.query('DELETE FROM stations WHERE station_id = $1', [stationId]);
+        await recordAudit(client, req, 'station.permanently_deleted', 'station', stationId, {
+            ...stationResult.rows[0],
+            deletedReadings: readingsResult.rowCount
+        });
+        await client.query('COMMIT');
+        res.json({ success: true, message: `Station permanently deleted with ${readingsResult.rowCount} reading(s).` });
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error permanently deleting station:', error);
+        res.status(500).json({ success: false, message: 'Failed to permanently delete station.' });
+    } finally {
+        client.release();
+    }
+});
+
 // 3. (Optional) Force fetch latest data loggers from external API
 // This simply proxies the external API call we set up earlier
-app.get('/api/external/pysical-dataloggers', async (req, res) => {
+app.get('/api/external/pysical-dataloggers', protect(['Admin', 'Data Manager']), async (req, res) => {
     try {
         const result = await climdesService.fetchDataLoggers();
         res.json(result);
@@ -637,7 +847,7 @@ app.get('/api/config', protect(['Admin', 'Data Manager']), (req, res) => {
 });
 
 // 5. Update configuration
-app.post('/api/config', protect(['Admin']), (req, res) => {
+app.post('/api/config', protect(['Admin']), async (req, res) => {
     const { provider, credentials, system } = req.body;
     const normalizedProvider = provider ? String(provider).toUpperCase() : null;
 
@@ -678,6 +888,9 @@ app.post('/api/config', protect(['Admin']), (req, res) => {
 
     if (success) {
         if (normalizedProvider === 'PULSOWEB') pulsowebService.clearContextCache();
+        await recordAudit(db, req, 'configuration.updated', 'provider', normalizedProvider || 'system', {
+            keys: Object.keys(updates)
+        });
         res.json({ success: true, message: 'Configuration updated successfully. Note: some changes might require a server restart.' });
     } else {
         res.status(500).json({ success: false, message: 'Failed to update configuration' });
@@ -716,9 +929,14 @@ app.post('/api/providers/:provider/import-stations', protect(['Admin', 'Data Man
 
         const result = await importProviderStations(provider);
         const geocoding = await geocodeProviderStations(provider);
+        await recordAudit(db, req, 'provider.stations_imported', 'provider', provider, {
+            imported: result.count,
+            rejected: result.rejected.length,
+            geocoding
+        });
         res.json({
             success: true,
-            message: `Imported ${result.count} ${provider} station(s); detected State/LGA for ${geocoding.updated} station(s).`,
+            message: `Imported ${result.count} ${provider} station(s), rejected ${result.rejected.length} unsafe record(s), and detected State/LGA for ${geocoding.updated} station(s).`,
             data: { count: result.count, geocoding }
         });
     } catch (error) {
@@ -928,22 +1146,27 @@ app.post('/api/sync/provider', protect(['Admin', 'Data Manager']), async (req, r
 });
 
 // 11. Authentication Routes
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', limitLoginAttempts, async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        if (!username || !password) {
-            return res.status(400).json({ success: false, message: 'Please provide username and password' });
+        if (typeof username !== 'string' || typeof password !== 'string' ||
+            !username.trim() || !password || username.length > 64 || password.length > 256) {
+            return res.status(400).json({ success: false, message: 'A valid username and password are required.' });
         }
 
         const result = await db.query('SELECT * FROM users WHERE username = $1', [username]);
         const user = result.rows[0];
 
         if (!user || !(await comparePassword(password, user.password))) {
+            await recordAudit(db, req, 'auth.login_failed', 'user', username, { username });
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
 
         const token = generateToken(user);
+        loginAttempts.delete(req.ip || req.socket.remoteAddress || 'unknown');
+        req.user = { id: user.id, username: user.username, role: user.role };
+        await recordAudit(db, req, 'auth.login_succeeded', 'user', user.id, { username: user.username });
 
         res.json({
             success: true,
@@ -986,12 +1209,22 @@ app.post('/api/users', protect(['Admin']), async (req, res) => {
         if (!username || !password || !role) {
             return res.status(400).json({ success: false, message: 'Username, password and role are required' });
         }
+        if (!/^[A-Za-z0-9._-]{3,64}$/.test(username)) {
+            return res.status(400).json({ success: false, message: 'Username must be 3-64 characters and use only letters, numbers, dots, underscores, or hyphens.' });
+        }
+        if (!['Admin', 'Data Manager', 'Data Viewer'].includes(role)) {
+            return res.status(400).json({ success: false, message: 'Invalid user role.' });
+        }
+        if (String(password).length < 12 || String(password).length > 128) {
+            return res.status(400).json({ success: false, message: 'Password must contain between 12 and 128 characters.' });
+        }
 
         const passwordHash = await hashPassword(password);
-        await db.query(
-            'INSERT INTO users (username, name, role, password) VALUES ($1, $2, $3, $4)',
+        const result = await db.query(
+            'INSERT INTO users (username, name, role, password) VALUES ($1, $2, $3, $4) RETURNING id',
             [username, name, role, passwordHash]
         );
+        await recordAudit(db, req, 'user.created', 'user', result.rows[0].id, { username, role });
 
         res.json({ success: true, message: 'User created successfully' });
     } catch (error) {
@@ -1011,7 +1244,9 @@ app.delete('/api/users/:id', protect(['Admin']), async (req, res) => {
             return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
         }
 
-        await db.query('DELETE FROM users WHERE id = $1', [id]);
+        const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING username, role', [id]);
+        if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+        await recordAudit(db, req, 'user.deleted', 'user', id, result.rows[0]);
         res.json({ success: true, message: 'User deleted successfully' });
     } catch (error) {
         console.error('Delete user error:', error);
@@ -1024,9 +1259,13 @@ app.patch('/api/users/:id/role', protect(['Admin']), async (req, res) => {
         const { id } = req.params;
         const { role } = req.body;
 
-        if (!role) return res.status(400).json({ success: false, message: 'Role is required' });
+        if (!['Admin', 'Data Manager', 'Data Viewer'].includes(role)) {
+            return res.status(400).json({ success: false, message: 'Invalid user role.' });
+        }
 
-        await db.query('UPDATE users SET role = $1 WHERE id = $2', [role, id]);
+        const result = await db.query('UPDATE users SET role = $1 WHERE id = $2 RETURNING username', [role, id]);
+        if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+        await recordAudit(db, req, 'user.role_updated', 'user', id, { username: result.rows[0].username, role });
         res.json({ success: true, message: 'User role updated successfully' });
     } catch (error) {
         console.error('Update role error:', error);
@@ -1038,8 +1277,15 @@ app.post('/api/auth/change-password', protect(), async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
+        if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' ||
+            newPassword.length < 12 || newPassword.length > 128) {
+            return res.status(400).json({ success: false, message: 'New password must contain between 12 and 128 characters.' });
+        }
+
         const result = await db.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
         const user = result.rows[0];
+
+        if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
 
         if (!(await comparePassword(currentPassword, user.password))) {
             return res.status(400).json({ success: false, message: 'Incorrect current password' });
@@ -1047,6 +1293,7 @@ app.post('/api/auth/change-password', protect(), async (req, res) => {
 
         const newHash = await hashPassword(newPassword);
         await db.query('UPDATE users SET password = $1 WHERE id = $2', [newHash, req.user.id]);
+        await recordAudit(db, req, 'user.password_changed', 'user', req.user.id);
 
         res.json({ success: true, message: 'Password changed successfully' });
     } catch (error) {
@@ -1071,6 +1318,9 @@ app.get('/api/health', (req, res) => {
         }
     });
 });
+
+// All API routes must be registered before the static frontend and SPA fallback.
+mountFrontend(app, path.join(__dirname, '../frontend/dist'));
 
 app.listen(port, '127.0.0.1', () => {
     console.log(`Server running at http://127.0.0.1:${port}`);
