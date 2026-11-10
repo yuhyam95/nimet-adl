@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import { Map as MapIcon, Table as TableIcon, Plus as PlusIcon, ShieldCheck, AlertTriangle, Maximize2, Minimize2, Search } from 'lucide-react';
+import { Map as MapIcon, Table as TableIcon, Plus as PlusIcon, ShieldCheck, AlertTriangle, Maximize2, Minimize2, Search, Trash2 } from 'lucide-react';
 import { MapContainer, TileLayer, Popup, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -39,6 +39,14 @@ interface Station {
     reporting_frequency_text?: string;
 }
 
+interface QuarantinedStation {
+    station_id: string;
+    station_name: string | null;
+    provider: string | null;
+    quarantine_reason: string | null;
+    quarantined_at: string | null;
+}
+
 const Stations = () => {
     const { user } = useAuth();
     const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
@@ -47,6 +55,8 @@ const Stations = () => {
     const [filterTransmission, setFilterTransmission] = useState<string>('all');
     const [searchTerm, setSearchTerm] = useState('');
     const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+    const [removingStationId, setRemovingStationId] = useState<string | null>(null);
+    const [quarantineActionId, setQuarantineActionId] = useState<string | null>(null);
 
     useEffect(() => {
         const handleFullscreenChange = () => {
@@ -87,6 +97,74 @@ const Stations = () => {
             return res.data.success ? res.data.data : [];
         },
     });
+
+    const { data: quarantinedStations = [], refetch: refetchQuarantined } = useQuery<QuarantinedStation[]>({
+        queryKey: ['quarantined-stations'],
+        enabled: user?.role === 'Admin',
+        queryFn: async () => {
+            const res = await axios.get('/api/admin/stations/quarantined');
+            return res.data.success ? res.data.data : [];
+        },
+    });
+
+    const handleRemoveStation = async (station: Station) => {
+        const reason = window.prompt(
+            `Why should ${station.station_name || station.station_id} be removed? This will quarantine it and preserve its data for investigation.`
+        );
+        if (!reason) return;
+        if (!window.confirm(`Remove station ${station.station_id} from the platform?`)) return;
+
+        setRemovingStationId(station.station_id);
+        try {
+            await axios.post('/api/admin/stations/quarantine', {
+                stationId: station.station_id,
+                reason
+            });
+            await Promise.all([refetch(), refetchQuarantined()]);
+        } catch (error: unknown) {
+            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
+            window.alert(message || 'Failed to remove the station.');
+        } finally {
+            setRemovingStationId(null);
+        }
+    };
+
+    const handleRestoreStation = async (stationId: string) => {
+        if (!window.confirm(`Restore station ${stationId} to the platform?`)) return;
+        setQuarantineActionId(stationId);
+        try {
+            await axios.post('/api/admin/stations/restore', { stationId });
+            await Promise.all([refetch(), refetchQuarantined()]);
+        } catch (error: unknown) {
+            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
+            window.alert(message || 'Failed to restore the station.');
+        } finally {
+            setQuarantineActionId(null);
+        }
+    };
+
+    const handlePermanentDelete = async (stationId: string) => {
+        const confirmation = window.prompt(
+            `This permanently deletes the station and all of its readings. Type the exact station ID to continue:\n\n${stationId}`
+        );
+        if (confirmation !== stationId) {
+            if (confirmation !== null) window.alert('The station ID did not match. Nothing was deleted.');
+            return;
+        }
+
+        setQuarantineActionId(stationId);
+        try {
+            await axios.delete('/api/admin/stations/permanent', {
+                data: { stationId, confirmation }
+            });
+            await refetchQuarantined();
+        } catch (error: unknown) {
+            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
+            window.alert(message || 'Failed to permanently delete the station.');
+        } finally {
+            setQuarantineActionId(null);
+        }
+    };
 
     const filteredStations = stations.filter((station: Station) => {
         const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -268,6 +346,64 @@ const Stations = () => {
                 </div>
             </div>
 
+            {user?.role === 'Admin' && (
+                <details style={{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--surface)', padding: '14px 16px' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                        Quarantined stations ({quarantinedStations.length})
+                    </summary>
+                    <p style={{ margin: '10px 0', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                        These stations are hidden and cannot synchronize. Restore a false positive or permanently delete a confirmed unwanted record.
+                    </p>
+                    {quarantinedStations.length === 0 ? (
+                        <p style={{ color: 'var(--text-muted)' }}>No stations are currently quarantined.</p>
+                    ) : (
+                        <div className={styles.tableContainer}>
+                            <table className={styles.table}>
+                                <thead>
+                                    <tr>
+                                        <th>Station</th>
+                                        <th>Provider</th>
+                                        <th>Reason</th>
+                                        <th>Quarantined</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {quarantinedStations.map((station) => (
+                                        <tr key={station.station_id}>
+                                            <td>{station.station_name || '(Unnamed station)'}<br /><small>{station.station_id}</small></td>
+                                            <td>{station.provider || '-'}</td>
+                                            <td>{station.quarantine_reason || '-'}</td>
+                                            <td>{station.quarantined_at ? new Date(station.quarantined_at).toLocaleString() : '-'}</td>
+                                            <td>
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                                    <button
+                                                        type="button"
+                                                        disabled={quarantineActionId === station.station_id}
+                                                        onClick={() => handleRestoreStation(station.station_id)}
+                                                        style={{ padding: '6px 10px', border: '1px solid #bfdbfe', borderRadius: '6px', background: '#eff6ff', color: '#1d4ed8', cursor: 'pointer' }}
+                                                    >
+                                                        Restore
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={quarantineActionId === station.station_id}
+                                                        onClick={() => handlePermanentDelete(station.station_id)}
+                                                        style={{ padding: '6px 10px', border: '1px solid #fecaca', borderRadius: '6px', background: '#fff1f2', color: '#be123c', cursor: 'pointer' }}
+                                                    >
+                                                        Delete permanently
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </details>
+            )}
+
             <div className={styles.filters}>
                 <div className={`${styles.filterGroup} ${styles.searchGroup}`}>
                     <label className={styles.filterLabel} htmlFor="station-search">Search stations</label>
@@ -340,6 +476,7 @@ const Stations = () => {
                                 <th>Latest Reading</th>
                                 <th>Functional Status</th>
                                 <th>Transmission Status</th>
+                                {user?.role === 'Admin' && <th>Security Action</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -351,8 +488,8 @@ const Stations = () => {
                                 return (
                                     <tr key={station.station_id}>
                                         <td>
-                                            <Link to={`/stations/${station.station_id}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
-                                                {station.station_name}
+                                            <Link to={`/stations/${encodeURIComponent(station.station_id)}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
+                                                {station.station_name || '(Unnamed station)'}
                                             </Link>
                                         </td>
                                         <td>
@@ -388,12 +525,26 @@ const Stations = () => {
                                                 {isTransmitting ? 'Transmitting' : 'Offline'}
                                             </span>
                                         </td>
+                                        {user?.role === 'Admin' && (
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveStation(station)}
+                                                    disabled={removingStationId === station.station_id}
+                                                    title="Remove and quarantine this station"
+                                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 10px', border: '1px solid #fecaca', borderRadius: '6px', background: '#fff1f2', color: '#be123c', cursor: 'pointer' }}
+                                                >
+                                                    <Trash2 size={14} />
+                                                    {removingStationId === station.station_id ? 'Removing…' : 'Remove'}
+                                                </button>
+                                            </td>
+                                        )}
                                     </tr>
                                 );
                             })}
                             {filteredStations.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                                    <td colSpan={user?.role === 'Admin' ? 9 : 8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                                         No stations match the selected filters.
                                     </td>
                                 </tr>
@@ -474,8 +625,8 @@ const Stations = () => {
                                     }}
                                 >
                                     <Popup>
-                                        <Link to={`/stations/${station.station_id}`} style={{ fontWeight: 'bold', fontSize: '1.1em', textDecoration: 'none', color: '#333' }}>
-                                            {station.station_name}
+                                        <Link to={`/stations/${encodeURIComponent(station.station_id)}`} style={{ fontWeight: 'bold', fontSize: '1.1em', textDecoration: 'none', color: '#333' }}>
+                                            {station.station_name || '(Unnamed station)'}
                                         </Link><br />
                                         Provider: {station.provider}<br />
                                         ID: {station.station_id}<br />

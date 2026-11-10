@@ -71,8 +71,8 @@ const resetPassword = async () => {
     const password = await readHidden('New password: ');
     const confirmation = await readHidden('Confirm new password: ');
 
-    if (!password) {
-        throw new Error('Password cannot be empty.');
+    if (password.length < 12 || password.length > 128) {
+        throw new Error('Password must contain between 12 and 128 characters.');
     }
 
     if (password !== confirmation) {

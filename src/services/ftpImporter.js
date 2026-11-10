@@ -1,8 +1,10 @@
 const ftp = require("basic-ftp");
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('../db/index.js');
 const config = require('../config/index.js');
+const { validateFtpFilename, validateStationId } = require('../utils/stationSecurity.js');
 
 const processFtpData = async () => {
     const wagtechConfig = config.wagtech;
@@ -49,60 +51,61 @@ const processFtpData = async () => {
         }
 
         for (const file of csvFiles) {
-            const tempFilePath = path.join(tempDir, file.name);
+            let tempFilePath = null;
+            try {
+                const remoteFilename = validateFtpFilename(file.name);
+                tempFilePath = path.join(tempDir, `${crypto.randomUUID()}.csv`);
 
-            // Download file
-            await client.downloadTo(tempFilePath, file.name);
+                // Use a random local filename so remote names can never control a filesystem path.
+                await client.downloadTo(tempFilePath, remoteFilename);
+                const fileContent = fs.readFileSync(tempFilePath, 'utf8');
 
-            // Read raw text
-            const fileContent = fs.readFileSync(tempFilePath, 'utf8');
-            
-            // Extract default station ID and timestamp from filename
-            let base = file.name.replace(/\.csv\s*$/i, '').trim();
-            const match = base.match(/(.+?)[-_](\d{8})[-_](\d{4,6})$/);
-            
-            let defaultStationId = base;
-            let defaultTimestamp = new Date().toISOString();
+                // Extract default station ID and timestamp from filename
+                const base = remoteFilename.replace(/\.csv\s*$/i, '').trim();
+                const match = base.match(/(.+?)[-_](\d{8})[-_](\d{4,6})$/);
 
-            if (match) {
-                defaultStationId = match[1].trim(); 
-                const dateStr = match[2]; 
-                let timeStr = match[3]; 
-                if (timeStr.length === 4) timeStr += '00';
-                
-                defaultTimestamp = `${dateStr.substring(0,4)}-${dateStr.substring(4,6)}-${dateStr.substring(6,8)}T${timeStr.substring(0,2)}:${timeStr.substring(2,4)}:${timeStr.substring(4,6)}Z`;
-            } else {
-                const fallbackMatch = base.match(/(.+?)[-_]202\d{5}/);
-                if (fallbackMatch) {
-                    defaultStationId = fallbackMatch[1].trim();
+                let defaultStationId = base;
+                let defaultTimestamp = new Date().toISOString();
+
+                if (match) {
+                    defaultStationId = match[1].trim();
+                    const dateStr = match[2];
+                    let timeStr = match[3];
+                    if (timeStr.length === 4) timeStr += '00';
+
+                    defaultTimestamp = `${dateStr.substring(0,4)}-${dateStr.substring(4,6)}-${dateStr.substring(6,8)}T${timeStr.substring(0,2)}:${timeStr.substring(2,4)}:${timeStr.substring(4,6)}Z`;
+                } else {
+                    const fallbackMatch = base.match(/(.+?)[-_]202\d{5}/);
+                    if (fallbackMatch) defaultStationId = fallbackMatch[1].trim();
+                }
+
+                // Detect format
+                if (fileContent.includes('#Name') || fileContent.includes('Date,Time,TA1_Avg')) {
+                    const { stationId: parsedId, records } = parseBaraniCsvString(fileContent);
+                    const finalStationId = validateStationId(parsedId || defaultStationId);
+
+                    for (const rec of records) {
+                        await insertReading(db, finalStationId, rec.timestamp, rec, 'BARANI');
+                    }
+                } else {
+                    const safeStationId = validateStationId(defaultStationId);
+                    const mappedData = parseWagtechCsvString(fileContent);
+                    if (Object.keys(mappedData).length > 0) {
+                        await insertReading(db, safeStationId, defaultTimestamp, mappedData, 'WAGTECH');
+                    }
+                }
+
+                await db.query(`
+                    INSERT INTO processed_ftp_files (filename)
+                    VALUES ($1) ON CONFLICT (filename) DO NOTHING
+                `, [remoteFilename]);
+            } catch (error) {
+                console.error(`Rejected FTP file ${JSON.stringify(file.name)}: ${error.message}`);
+            } finally {
+                if (tempFilePath && fs.existsSync(tempFilePath)) {
+                    fs.unlinkSync(tempFilePath);
                 }
             }
-
-            // Detect format
-            if (fileContent.includes('#Name') || fileContent.includes('Date,Time,TA1_Avg')) {
-                // BARANI Multi-line format
-                const { stationId: parsedId, records } = parseBaraniCsvString(fileContent);
-                const finalStationId = parsedId || defaultStationId;
-                
-                for (let rec of records) {
-                    await insertReading(db, finalStationId, rec.timestamp, rec, 'BARANI');
-                }
-            } else {
-                // WAGTECH Single-line format
-                const mappedData = parseWagtechCsvString(fileContent);
-                if (Object.keys(mappedData).length > 0) {
-                    await insertReading(db, defaultStationId, defaultTimestamp, mappedData, 'WAGTECH');
-                }
-            }
-
-            // Cleanup local temp file
-            fs.unlinkSync(tempFilePath);
-
-            // Record file as processed
-            await db.query(`
-                INSERT INTO processed_ftp_files (filename) 
-                VALUES ($1) ON CONFLICT (filename) DO NOTHING
-            `, [file.name]);
         }
 
         console.log('FTP sync completed successfully.');
@@ -115,14 +118,22 @@ const processFtpData = async () => {
 };
 
 async function insertReading(db, stationId, timestamp, mappedData, providerName = 'WAGTECH') {
-    if (!stationId || !timestamp) return;
+    if (!timestamp) return;
+    const safeStationId = validateStationId(stationId);
 
     // Upsert station basic info
-    await db.query(`
+    const stationResult = await db.query(`
         INSERT INTO stations (station_id, station_name, provider, is_active, updated_at, latitude, longitude) 
-        VALUES ($1, $2, $3, true, NOW(), 8.6753, 9.0820)
-        ON CONFLICT (station_id) DO NOTHING;
-    `, [stationId, stationId, providerName]);
+        VALUES ($1, $2, $3, true, NOW(), NULL, NULL)
+        ON CONFLICT (station_id) DO UPDATE SET updated_at = stations.updated_at
+        WHERE stations.provider = EXCLUDED.provider
+        RETURNING is_quarantined, provider;
+    `, [safeStationId, safeStationId, providerName]);
+
+    if (stationResult.rows.length === 0) {
+        throw new Error(`Station ID ${safeStationId} is already owned by another provider.`);
+    }
+    if (stationResult.rows[0]?.is_quarantined) return;
 
     // Insert weather reading
     const insertQuery = `
@@ -145,7 +156,7 @@ async function insertReading(db, stationId, timestamp, mappedData, providerName 
     `;
 
     await db.query(insertQuery, [
-        stationId, 
+        safeStationId,
         timestamp,
         mappedData.air_temperature !== undefined ? mappedData.air_temperature : null,
         mappedData.relative_humidity !== undefined ? mappedData.relative_humidity : null,
@@ -157,7 +168,7 @@ async function insertReading(db, stationId, timestamp, mappedData, providerName 
         mappedData.battery_voltage !== undefined ? mappedData.battery_voltage : null,
         mappedData.wind_gust !== undefined ? mappedData.wind_gust : null
     ]).catch(e => {
-        console.error(`Insert error for ${stationId} at ${timestamp}: ${e.message}`);
+        console.error(`Insert error for ${safeStationId} at ${timestamp}: ${e.message}`);
     });
 }
 

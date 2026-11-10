@@ -1,7 +1,18 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-default-secret-change-this-in-production';
+const configuredSecret = process.env.JWT_SECRET;
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction && (!configuredSecret || configuredSecret.length < 32)) {
+    throw new Error('JWT_SECRET must be configured with at least 32 characters in production.');
+}
+
+if (!configuredSecret) {
+    console.warn('JWT_SECRET is not configured. Using a development-only secret; never use this outside development.');
+}
+
+const JWT_SECRET = configuredSecret || 'development-only-secret-not-for-production';
 
 const generateToken = (user) => {
     return jwt.sign(
