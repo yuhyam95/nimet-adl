@@ -129,6 +129,13 @@ DB_QUERY_TIMEOUT_MS=30000
 DB_STATEMENT_TIMEOUT_MS=30000
 ```
 
+The frontend defaults to OpenStreetMap's standard tile endpoint. For another approved tile provider, configure these build-time variables in `frontend/.env.production` before deployment:
+
+```env
+VITE_MAP_TILE_URL=https://your-tile-provider.example/{z}/{x}/{y}.png
+VITE_MAP_ATTRIBUTION=Map data attribution required by your provider
+```
+
 Manual and CSV-created stations are always assigned the `MANUAL` provider. Station IDs and names containing path traversal or control characters are rejected, and unsafe upstream/FTP station records are skipped.
 
 Administrators can select **Remove** on the Stations table to quarantine a suspicious station. Quarantine hides the station and its readings from the platform, stops future provider synchronization for it, and preserves the record for investigation. Administrative endpoints are also available to list, restore, or permanently delete quarantined stations:
