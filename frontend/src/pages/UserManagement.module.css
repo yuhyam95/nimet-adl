@@ -156,6 +156,62 @@
     background: #fee2e2;
 }
 
+@media (max-width: 760px) {
+    .container {
+        padding: 8px 0;
+    }
+
+    .header {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 18px;
+        margin-bottom: 28px;
+    }
+
+    .titleSection h1 {
+        font-size: 1.5rem;
+    }
+
+    .createBtn {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .tableHeader {
+        display: none;
+    }
+
+    .userList {
+        display: grid;
+        gap: 12px;
+        border: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+
+    .userRow {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: white;
+    }
+
+    .userRow > :nth-child(3) {
+        grid-column: 1 / -1;
+    }
+
+    .modalOverlay {
+        padding: 14px;
+    }
+
+    .modal {
+        max-height: calc(100vh - 28px);
+        overflow-y: auto;
+    }
+}
+
 /* Modal Styling */
 .modalOverlay {
     position: fixed;

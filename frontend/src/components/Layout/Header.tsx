@@ -1,12 +1,22 @@
 import { useAuth } from '../../context/AuthContext';
+import { Menu } from 'lucide-react';
 import styles from './Header.module.css';
 
-const Header = () => {
+interface HeaderProps {
+    onMenuClick: () => void;
+}
+
+const Header = ({ onMenuClick }: HeaderProps) => {
     const { user } = useAuth();
     
     return (
         <header className={styles.header}>
-            <h1 className={styles.title}>Dashboard</h1>
+            <div className={styles.headingGroup}>
+                <button type="button" className={styles.menuButton} onClick={onMenuClick} aria-label="Open navigation">
+                    <Menu size={22} />
+                </button>
+                <h1 className={styles.title}>NiMet ADL</h1>
+            </div>
             <div className={styles.userProfile}>
                 <div className={styles.userInfo}>
                     <p className={styles.userName}>{user?.name || user?.username}</p>

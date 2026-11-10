@@ -3,6 +3,7 @@
     flex-direction: column;
     gap: 24px;
     animation: fadeIn 0.4s ease-out;
+    min-width: 0;
 }
 
 .statsGrid {
@@ -339,6 +340,9 @@
     background: white;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border);
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .table {
@@ -380,4 +384,83 @@
     position: relative;
     z-index: 10;
     border: 1px solid var(--border);
+}
+
+@media (max-width: 900px) {
+    .statsGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .filters {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: end;
+    }
+
+    .searchGroup {
+        grid-column: 1 / -1;
+    }
+
+    .searchInput,
+    .select {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .toggleContainer {
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    .toggleBtn {
+        flex: 1 0 auto;
+        justify-content: center;
+        white-space: nowrap;
+    }
+
+    .mapContainer {
+        height: min(65vh, 520px);
+        min-height: 380px;
+    }
+}
+
+@media (max-width: 640px) {
+    .dashboard {
+        gap: 16px;
+    }
+
+    .statsGrid,
+    .filters {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .searchGroup {
+        grid-column: auto;
+    }
+
+    .statCard,
+    .stationCard,
+    .chartContainer {
+        padding: 16px;
+    }
+
+    .readingsGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cardFooter {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .viewDetails {
+        opacity: 1;
+    }
+
+    .mapContainer {
+        min-height: 360px;
+        height: 58vh;
+    }
 }
