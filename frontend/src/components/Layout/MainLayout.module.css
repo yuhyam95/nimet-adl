@@ -6,6 +6,7 @@
 
 .mainContent {
     flex: 1;
+    min-width: 0;
     margin-left: var(--sidebar-width);
     display: flex;
     flex-direction: column;
@@ -13,6 +14,7 @@
 
 .content {
     flex: 1;
+    min-width: 0;
     padding: var(--container-padding);
     background-color: var(--bg-main);
 }
@@ -24,8 +26,27 @@
     animation: fadeIn 0.4s ease-out forwards;
 }
 
+.navigationBackdrop {
+    display: none;
+}
+
 @media (max-width: 1024px) {
     .mainContent {
         margin-left: 0;
+    }
+
+    .navigationBackdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 90;
+        background: rgba(15, 23, 42, 0.5);
+        backdrop-filter: blur(2px);
+    }
+}
+
+@media (max-width: 640px) {
+    .content {
+        padding: var(--container-padding);
     }
 }

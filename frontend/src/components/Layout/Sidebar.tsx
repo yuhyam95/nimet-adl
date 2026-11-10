@@ -7,12 +7,18 @@ import {
     Users,
     User,
     Radio,
+    X,
 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import styles from './Sidebar.module.css';
 
-export const Sidebar = () => {
+interface SidebarProps {
+    isOpen: boolean;
+    onNavigate: () => void;
+}
+
+export const Sidebar = ({ isOpen, onNavigate }: SidebarProps) => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
@@ -37,10 +43,12 @@ export const Sidebar = () => {
     };
 
     return (
-        <aside className={styles.sidebar}>
+        <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`} aria-label="Primary navigation">
             <div className={styles.header}>
-                {/* Placeholder logo or text */}
                 <h2 className={styles.title}>NiMet ADL</h2>
+                <button type="button" className={styles.closeButton} onClick={onNavigate} aria-label="Close navigation">
+                    <X size={22} />
+                </button>
             </div>
 
             <nav className={styles.nav}>
@@ -48,6 +56,7 @@ export const Sidebar = () => {
                     <NavLink
                         key={item.path}
                         to={item.path}
+                        onClick={onNavigate}
                         className={({ isActive }: { isActive: boolean }) =>
                             `${styles.navItem} ${isActive ? styles.active : ''}`
                         }

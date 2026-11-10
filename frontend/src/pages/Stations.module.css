@@ -8,6 +8,8 @@
     flex-direction: column;
     gap: 16px;
     height: 100%;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .header {
@@ -15,6 +17,7 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
+    gap: 16px;
 }
 
 .filters {
@@ -29,6 +32,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0;
 }
 
 .searchGroup {
@@ -128,6 +132,9 @@
 .tableContainer {
     overflow-x: auto;
     width: 100%;
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .table {
@@ -254,4 +261,145 @@
     color: var(--text-muted);
     margin-top: 2px;
     display: block;
+}
+
+@media (max-width: 900px) {
+    .container {
+        padding: 18px;
+        border-radius: var(--radius-md);
+    }
+
+    .header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .toggleContainer {
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    .toggleBtn {
+        flex: 1 0 auto;
+        justify-content: center;
+        white-space: nowrap;
+    }
+
+    .filters {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: end;
+    }
+
+    .searchGroup {
+        grid-column: 1 / -1;
+    }
+
+    .searchInput,
+    .select {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .statsGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    .mapContainer {
+        height: min(65vh, 520px);
+        min-height: 380px;
+    }
+}
+
+@media (max-width: 640px) {
+    .container {
+        padding: 14px;
+        gap: 14px;
+        box-shadow: none;
+    }
+
+    .header > div:first-child {
+        align-items: flex-start !important;
+        flex-direction: column;
+        gap: 4px !important;
+    }
+
+    .filters,
+    .statsGrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .searchGroup {
+        grid-column: auto;
+    }
+
+    .statCard {
+        padding: 16px;
+    }
+
+    .tableContainer {
+        overflow: visible;
+    }
+
+    .table {
+        min-width: 0;
+        border-collapse: separate;
+        border-spacing: 0 12px;
+    }
+
+    .table thead {
+        display: none;
+    }
+
+    .table tbody,
+    .table tr,
+    .table td {
+        display: block;
+        width: 100%;
+    }
+
+    .table tr {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
+
+    .table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 11px 14px;
+        text-align: right;
+        overflow-wrap: anywhere;
+    }
+
+    .table td[data-label]::before {
+        content: attr(data-label);
+        flex: 0 0 42%;
+        text-align: left;
+        color: var(--text-muted);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+    }
+
+    .table td > * {
+        max-width: 58%;
+    }
+
+    .table td[colspan] {
+        display: block;
+        text-align: center;
+    }
+
+    .mapContainer {
+        min-height: 360px;
+        height: 58vh;
+        border-radius: var(--radius-md);
+    }
 }

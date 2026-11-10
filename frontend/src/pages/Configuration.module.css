@@ -76,8 +76,49 @@
 
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 450px), 1fr));
     gap: 24px;
+}
+
+@media (max-width: 700px) {
+    .container {
+        padding: 8px 0;
+    }
+
+    .header,
+    .cardHeader,
+    .infoRow,
+    .syncDates {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .header {
+        gap: 16px;
+        margin-bottom: 28px;
+    }
+
+    .titleSection h1 {
+        font-size: 1.5rem;
+    }
+
+    .refreshBtn {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .cardHeader,
+    .cardBody {
+        padding: 18px;
+    }
+
+    .infoRow {
+        gap: 4px;
+    }
+
+    .value {
+        overflow-wrap: anywhere;
+    }
 }
 
 .card {

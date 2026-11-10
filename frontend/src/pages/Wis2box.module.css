@@ -119,3 +119,33 @@
     background-color: #93c5fd;
     cursor: not-allowed;
 }
+
+@media (max-width: 700px) {
+    .container {
+        padding: 16px;
+        min-width: 0;
+        box-shadow: none;
+    }
+
+    .header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .filters {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        width: 100%;
+    }
+
+    .select {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .tableContainer {
+        max-width: 100%;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+}

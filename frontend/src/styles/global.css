@@ -41,6 +41,13 @@
   padding: 0;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: var(--bg-main);
@@ -48,6 +55,7 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 #root {
@@ -67,6 +75,31 @@ button {
   background: none;
   font-family: inherit;
   transition: all 0.2s ease;
+}
+
+img,
+svg,
+canvas {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --container-padding: 24px;
+    --header-height: 64px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --container-padding: 14px;
+  }
 }
 
 /* Scrollbar Customization */

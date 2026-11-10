@@ -186,3 +186,42 @@
     color: var(--danger);
     border: 1px solid rgba(239, 68, 68, 0.2);
 }
+
+@media (max-width: 700px) {
+    .container {
+        padding: 16px;
+        box-shadow: none;
+    }
+
+    .header,
+    .actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .tabs {
+        gap: 0;
+        overflow-x: auto;
+    }
+
+    .tab {
+        flex: 1 0 auto;
+        padding: 10px 14px;
+        white-space: nowrap;
+    }
+
+    .formGrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .submitBtn,
+    .cancelBtn {
+        justify-content: center;
+        text-align: center;
+        width: 100%;
+    }
+
+    .fileDropZone {
+        padding: 32px 16px;
+    }
+}

@@ -226,3 +226,31 @@
     color: #991b1b;
     border: 1px solid #fecaca;
 }
+
+@media (max-width: 700px) {
+    .container {
+        padding: 8px 0;
+    }
+
+    .titleSection h1 {
+        font-size: 1.5rem;
+    }
+
+    .cardBody {
+        padding: 20px;
+    }
+
+    .profileHeader,
+    .infoItem {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .infoItem {
+        gap: 6px;
+    }
+
+    .infoValue {
+        overflow-wrap: anywhere;
+    }
+}

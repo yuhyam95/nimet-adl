@@ -10,6 +10,7 @@
     top: 0;
     border-right: 1px solid rgba(255, 255, 255, 0.05);
     z-index: 100;
+    transition: transform 0.25s ease;
 }
 
 .header {
@@ -17,6 +18,14 @@
     display: flex;
     align-items: center;
     gap: 12px;
+}
+
+.closeButton {
+    display: none;
+    margin-left: auto;
+    color: white;
+    padding: 8px;
+    border-radius: 8px;
 }
 
 .logo {
@@ -38,6 +47,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    overflow-y: auto;
 }
 
 .navItem {
@@ -104,4 +114,30 @@
 
 .logoutBtn:hover {
     background-color: rgba(251, 113, 133, 0.1);
+}
+
+@media (max-width: 1024px) {
+    .sidebar {
+        width: min(84vw, 300px);
+        transform: translateX(-100%);
+        box-shadow: var(--shadow-lg);
+    }
+
+    .sidebar.open {
+        transform: translateX(0);
+    }
+
+    .closeButton {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .header {
+        padding: 20px;
+    }
+
+    .nav {
+        padding-top: 8px;
+    }
 }

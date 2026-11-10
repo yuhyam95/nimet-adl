@@ -372,11 +372,11 @@ const Stations = () => {
                                 <tbody>
                                     {quarantinedStations.map((station) => (
                                         <tr key={station.station_id}>
-                                            <td>{station.station_name || '(Unnamed station)'}<br /><small>{station.station_id}</small></td>
-                                            <td>{station.provider || '-'}</td>
-                                            <td>{station.quarantine_reason || '-'}</td>
-                                            <td>{station.quarantined_at ? new Date(station.quarantined_at).toLocaleString() : '-'}</td>
-                                            <td>
+                                            <td data-label="Station">{station.station_name || '(Unnamed station)'}<br /><small>{station.station_id}</small></td>
+                                            <td data-label="Provider">{station.provider || '-'}</td>
+                                            <td data-label="Reason">{station.quarantine_reason || '-'}</td>
+                                            <td data-label="Quarantined">{station.quarantined_at ? new Date(station.quarantined_at).toLocaleString() : '-'}</td>
+                                            <td data-label="Actions">
                                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                                                     <button
                                                         type="button"
@@ -488,23 +488,23 @@ const Stations = () => {
 
                                 return (
                                     <tr key={station.station_id}>
-                                        <td>
+                                        <td data-label="Station">
                                             <Link to={`/stations/${encodeURIComponent(station.station_id)}`} style={{ fontWeight: '500', color: 'inherit', textDecoration: 'none' }}>
                                                 {station.station_name || '(Unnamed station)'}
                                             </Link>
                                         </td>
-                                        <td>
+                                        <td data-label="Provider">
                                             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>
                                                 {station.provider}
                                             </span>
                                         </td>
-                                        <td>{station.latitude != null && station.longitude != null ? `${station.latitude}, ${station.longitude}` : 'Not provided'}</td>
-                                        <td>{[station.state, station.lga].filter(Boolean).join(' / ') || '-'}</td>
-                                        <td>{station.organization || '-'}</td>
-                                        <td className={styles.lastUpdate}>
+                                        <td data-label="Coordinates">{station.latitude != null && station.longitude != null ? `${station.latitude}, ${station.longitude}` : 'Not provided'}</td>
+                                        <td data-label="State / LGA">{[station.state, station.lga].filter(Boolean).join(' / ') || '-'}</td>
+                                        <td data-label="Organization">{station.organization || '-'}</td>
+                                        <td data-label="Latest Reading" className={styles.lastUpdate}>
                                             {lastUpdate ? lastUpdate.toLocaleString() : 'Never'}
                                         </td>
-                                        <td>
+                                        <td data-label="Functional Status">
                                             <span
                                                 className={styles.status}
                                                 style={{
@@ -515,7 +515,7 @@ const Stations = () => {
                                                 {isActive ? 'Active' : 'Inactive'}
                                             </span>
                                         </td>
-                                        <td>
+                                        <td data-label="Transmission Status">
                                             <span
                                                 className={styles.status}
                                                 style={{
@@ -527,7 +527,7 @@ const Stations = () => {
                                             </span>
                                         </td>
                                         {user?.role === 'Admin' && (
-                                            <td>
+                                            <td data-label="Security Action">
                                                 <button
                                                     type="button"
                                                     onClick={() => handleRemoveStation(station)}
