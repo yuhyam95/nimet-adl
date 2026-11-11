@@ -105,6 +105,19 @@ After restarting the backend:
 
 PulsoWeb station IDs are stored internally with a `PULSOWEB:` prefix to prevent collisions with other providers. The original numeric code is retained in `source_station_id`. Because PulsoWeb may not supply coordinates, imported stations can initially appear without a map until their coordinates are added.
 
+## Scheduled synchronization
+
+The backend starts a synchronization when it launches and repeats it every 15 minutes. Automatic runs resume each station from its latest stored observation with a one-hour overlap, allowing delayed or corrected readings to be updated without repeatedly downloading two full days. Stations are processed with bounded concurrency and readings are written to PostgreSQL in batches. Provider metadata and missing station locations are refreshed once per day; manual synchronization continues to honor the complete date range selected by the user.
+
+Optional tuning:
+
+```env
+SYNC_OVERLAP_MINUTES=60
+SYNC_STATION_CONCURRENCY=5
+```
+
+Keep some overlap to accommodate upstream delays. Increase concurrency carefully and within provider API rate limits.
+
 ## Station location detection
 
 CLIMDES, TAHMO, and PulsoWeb provider cards include **Import Stations & Detect Locations**. Provider imports and data synchronizations automatically detect missing State/LGA values when station coordinates are available. WAGTECH stations are discovered from FTP files; because that feed does not supply trustworthy coordinates, detection occurs after an administrator saves the station's real latitude and longitude. Detection uses the OpenStreetMap Nominatim reverse-geocoding service and stores the result locally. Optional configuration:

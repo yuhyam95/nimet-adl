@@ -1375,13 +1375,21 @@ app.listen(port, '127.0.0.1', () => {
 
     // Initial sync
     console.log('Running initial data sync...');
+    let syncInProgress = false;
     const runSync = async () => {
+        if (syncInProgress) {
+            console.log('Skipping scheduled sync because the previous run is still active.');
+            return;
+        }
+        syncInProgress = true;
         try {
             await syncData();
             systemStatus.lastSyncAt = new Date();
             systemStatus.lastSyncStatus = 'success';
         } catch (err) {
             systemStatus.lastSyncStatus = 'failed: ' + err.message;
+        } finally {
+            syncInProgress = false;
         }
     };
     runSync();
