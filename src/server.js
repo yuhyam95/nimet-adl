@@ -13,6 +13,7 @@ const { protect } = require('./middleware/auth.js');
 const { validateStationInput, validateCoordinates } = require('./utils/stationSecurity.js');
 const { recordAudit } = require('./utils/audit.js');
 const { mountFrontend } = require('./utils/frontend.js');
+const syncTracker = require('./services/syncTracker.js');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -1109,7 +1110,31 @@ app.post('/api/export/wis2box', protect(['Admin', 'Data Manager']), async (req, 
     }
 });
 
-// 10. Manual Sync Route
+// 10. Synchronization monitoring and manual sync
+app.get('/api/sync/runs', protect(['Admin', 'Data Manager', 'Data Viewer']), async (req, res) => {
+    try {
+        const runs = await syncTracker.listSyncRuns(req.query.page, req.query.pageSize);
+        res.json({ success: true, data: runs });
+    } catch (error) {
+        console.error('Sync runs error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load synchronization activity.' });
+    }
+});
+
+app.get('/api/sync/runs/:runId', protect(['Admin', 'Data Manager', 'Data Viewer']), async (req, res) => {
+    try {
+        if (!/^\d+$/.test(req.params.runId)) {
+            return res.status(400).json({ success: false, message: 'Invalid synchronization run ID.' });
+        }
+        const run = await syncTracker.getSyncRun(req.params.runId);
+        if (!run) return res.status(404).json({ success: false, message: 'Synchronization run not found.' });
+        res.json({ success: true, data: run });
+    } catch (error) {
+        console.error('Sync run details error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load synchronization details.' });
+    }
+});
+
 app.post('/api/sync/provider', protect(['Admin', 'Data Manager']), async (req, res) => {
     try {
         const { provider, startDate, endDate } = req.body;
@@ -1131,17 +1156,37 @@ app.post('/api/sync/provider', protect(['Admin', 'Data Manager']), async (req, r
 
         console.log(`Manual sync requested for ${provider} from ${startDate} to ${endDate}`);
 
+        const run = await syncTracker.createSyncRun({
+            provider: normalizedProvider,
+            triggerType: 'manual',
+            startDate,
+            endDate,
+            requestedBy: req.user
+        });
+
         // Run in background so request doesn't timeout
-        syncProviderData(normalizedProvider, startDate, endDate)
+        syncProviderData(normalizedProvider, startDate, endDate, {
+            runId: run.id,
+            triggerType: 'manual',
+            requestedBy: req.user
+        })
             .then(() => console.log(`Manual sync completed for ${provider}`))
             .catch(err => console.error(`Manual sync failed for ${provider}:`, err));
 
-        res.json({
+        res.status(202).json({
             success: true,
+            runId: run.id,
             message: `Synchronization started for ${provider}. It will continue in the background.`
         });
     } catch (error) {
         console.error('Manual sync error:', error);
+        if (error.code === 'SYNC_ALREADY_RUNNING') {
+            return res.status(409).json({
+                success: false,
+                runId: error.runId,
+                message: error.message
+            });
+        }
         res.status(500).json({ success: false, error: 'Failed to start manual synchronization' });
     }
 });

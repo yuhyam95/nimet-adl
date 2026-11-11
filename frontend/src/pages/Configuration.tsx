@@ -1,12 +1,55 @@
 import React from 'react';
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
-import { Settings, Server, Database, Shield, CheckCircle, AlertCircle, RefreshCw, Edit2, Save, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Settings, Server, Database, Shield, CheckCircle, AlertCircle, RefreshCw, Edit2, Save, X, Activity, AlertTriangle, XCircle } from 'lucide-react';
 import { Skeleton } from '../components/ui/Skeleton';
-import MappingManager from '../components/MappingManager';
-import PulsoWebMetadataExplorer from '../components/PulsoWebMetadataExplorer';
+import ConfigurationNav from '../components/ConfigurationNav';
 import styles from './Configuration.module.css';
 
+interface SyncFailure {
+    station_id: string;
+    station_name?: string | null;
+    error_message?: string | null;
+}
+
+interface SyncRun {
+    id: string;
+    provider: string;
+    trigger_type: 'manual' | 'automatic';
+    status: 'queued' | 'running' | 'completed' | 'partial' | 'failed';
+    phase: string;
+    requested_by_username?: string | null;
+    requested_start: string;
+    requested_end: string;
+    total_stations: number;
+    processed_stations: number;
+    successful_stations: number;
+    failed_stations: number;
+    skipped_stations: number;
+    readings_processed: number;
+    current_station_id?: string | null;
+    current_chunk?: number | null;
+    total_chunks?: number | null;
+    error_message?: string | null;
+    created_at: string;
+    completed_at?: string | null;
+    failures: SyncFailure[];
+}
+
+interface SyncRunsResponse {
+    active: SyncRun[];
+    history: SyncRun[];
+    pagination: {
+        page: number;
+        pageSize: number;
+        total: number;
+        totalPages: number;
+    };
+}
+
+const formatSyncPhase = (phase: string) => phase.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+const formatSyncTime = (value?: string | null) => value ? new Date(value).toLocaleString() : '—';
 
 
 const Configuration = () => {
@@ -15,8 +58,7 @@ const Configuration = () => {
     const [saving, setSaving] = React.useState(false);
     const [syncDates, setSyncDates] = React.useState<any>({});
     const [syncing, setSyncing] = React.useState<string | null>(null);
-    const [testingProvider, setTestingProvider] = React.useState<string | null>(null);
-    const [importingStations, setImportingStations] = React.useState<string | null>(null);
+    const [syncPage, setSyncPage] = React.useState(1);
 
     const { data, isLoading, isError, error, refetch } = useQuery({
         queryKey: ['config'],
@@ -30,6 +72,22 @@ const Configuration = () => {
     });
 
     const providers = data?.providers || [];
+
+    const { data: syncRuns, refetch: refetchSyncRuns } = useQuery<SyncRunsResponse>({
+        queryKey: ['sync-runs', syncPage],
+        queryFn: async () => {
+            const response = await axios.get('/api/sync/runs', { params: { page: syncPage, pageSize: 6 } });
+            return response.data.data;
+        },
+        refetchInterval: query => {
+            const runs = query.state.data?.active || [];
+            return runs.length > 0 ? 3000 : 30000;
+        }
+    });
+
+    const activeSyncRuns = syncRuns?.active || [];
+    const recentSyncRuns = syncRuns?.history || [];
+    const syncPagination = syncRuns?.pagination || { page: 1, pageSize: 6, total: 0, totalPages: 1 };
 
     const { data: networkStations = [] } = useQuery({
         queryKey: ['stations', 'configuration-readiness'],
@@ -100,32 +158,6 @@ const Configuration = () => {
         }
     };
 
-    const handleTestProvider = async (providerName: string) => {
-        setTestingProvider(providerName);
-        try {
-            const res = await axios.post(`/api/providers/${providerName.toLowerCase()}/test`);
-            alert(res.data.message || `${providerName} connection succeeded.`);
-        } catch (error: unknown) {
-            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
-            alert(message || `${providerName} connection failed.`);
-        } finally {
-            setTestingProvider(null);
-        }
-    };
-
-    const handleImportProviderStations = async (providerName: string) => {
-        setImportingStations(providerName);
-        try {
-            const response = await axios.post(`/api/providers/${providerName.toLowerCase()}/import-stations`);
-            alert(response.data.message || `${providerName} stations imported successfully.`);
-        } catch (error: unknown) {
-            const message = axios.isAxiosError(error) ? error.response?.data?.message : null;
-            alert(message || `Failed to import ${providerName} stations.`);
-        } finally {
-            setImportingStations(null);
-        }
-    };
-
     const handleSave = async (providerName: string) => {
         setSaving(true);
         try {
@@ -164,11 +196,18 @@ const Configuration = () => {
                 endDate
             });
             if (res.data.success) {
-                alert(res.data.message);
+                const runReference = res.data.runId ? ` Track run #${res.data.runId} in Synchronization Activity above.` : '';
+                alert(`${res.data.message}${runReference}`);
+                setSyncPage(1);
+                refetchSyncRuns();
             }
         } catch (error) {
             console.error('Manual sync failed:', error);
-            alert('Failed to start manual synchronization.');
+            if (axios.isAxiosError(error) && error.response?.data?.message) {
+                alert(error.response.data.message);
+            } else {
+                alert('Failed to start manual synchronization.');
+            }
         } finally {
             setSyncing(null);
         }
@@ -203,10 +242,124 @@ const Configuration = () => {
                         <p>Manage data providers and system settings</p>
                     </div>
                 </div>
-                <button onClick={() => refetch()} className={styles.refreshBtn}>
+                <button onClick={() => { refetch(); refetchSyncRuns(); }} className={styles.refreshBtn}>
                     <RefreshCw size={18} />
                     Refresh
                 </button>
+            </div>
+
+            <ConfigurationNav />
+
+            <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                    <Activity size={20} />
+                    <h2>Synchronization Activity</h2>
+                    {activeSyncRuns.length > 0 && (
+                        <span className={styles.liveBadge}><RefreshCw size={14} /> Live</span>
+                    )}
+                </div>
+                <div className={styles.syncTrackerCard}>
+                    <p className={styles.syncTrackerIntro}>Track manual and automatic provider synchronizations, including station-level failures.</p>
+                    {activeSyncRuns.length > 0 ? (
+                        <div className={styles.activeSyncGrid}>
+                            {activeSyncRuns.map(run => {
+                                const total = Number(run.total_stations || 0);
+                                const processed = Number(run.processed_stations || 0);
+                                const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+                                return (
+                                    <article key={run.id} className={styles.activeSyncCard}>
+                                        <div className={styles.syncRunHeader}>
+                                            <div>
+                                                <strong>{run.provider}</strong>
+                                                <span>{run.trigger_type === 'manual' ? 'Manual' : 'Automatic'} sync · Run #{run.id}</span>
+                                            </div>
+                                            <span className={styles.runningStatus}><RefreshCw size={14} /> {formatSyncPhase(run.phase)}</span>
+                                        </div>
+                                        <div className={styles.progressTrack} aria-label={`${progress}% complete`}>
+                                            <span style={{ width: `${progress}%` }} />
+                                        </div>
+                                        <div className={styles.syncProgressMeta}>
+                                            <span>{processed} of {total || '…'} stations</span>
+                                            <strong>{progress}%</strong>
+                                        </div>
+                                        <div className={styles.syncCurrentWork}>
+                                            <span>Current: {run.current_station_id || formatSyncPhase(run.phase)}</span>
+                                            {run.current_chunk && run.total_chunks
+                                                ? <span>Chunk {run.current_chunk} of {run.total_chunks}</span>
+                                                : null}
+                                        </div>
+                                        <div className={styles.syncCounts}>
+                                            <span>{run.successful_stations} completed</span>
+                                            <span>{run.failed_stations} failed</span>
+                                            <span>{run.skipped_stations} skipped</span>
+                                            <span>{run.readings_processed} readings</span>
+                                        </div>
+                                    </article>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className={styles.syncIdle}><CheckCircle size={18} /> No synchronization is currently running.</div>
+                    )}
+
+                    {recentSyncRuns.length > 0 && (
+                        <div className={styles.syncHistory}>
+                            <h3>Recent runs</h3>
+                            {recentSyncRuns.map(run => (
+                                <details key={run.id} className={styles.syncHistoryItem}>
+                                    <summary>
+                                        <span className={`${styles.syncResultIcon} ${styles[run.status]}`}>
+                                            {run.status === 'completed'
+                                                ? <CheckCircle size={17} />
+                                                : run.status === 'partial'
+                                                    ? <AlertTriangle size={17} />
+                                                    : <XCircle size={17} />}
+                                        </span>
+                                        <span className={styles.syncHistoryIdentity}>
+                                            <strong>{run.provider}</strong>
+                                            <small>{run.trigger_type === 'manual' ? 'Manual' : 'Automatic'} · Run #{run.id}</small>
+                                        </span>
+                                        <span className={styles.syncHistoryCounts}>{run.successful_stations} completed · {run.failed_stations} failed</span>
+                                        <time>{formatSyncTime(run.completed_at || run.created_at)}</time>
+                                    </summary>
+                                    <div className={styles.syncHistoryDetails}>
+                                        <p>Range: {run.requested_start} to {run.requested_end}</p>
+                                        <p>{run.readings_processed} readings processed; {run.skipped_stations} stations skipped.</p>
+                                        {run.requested_by_username && <p>Requested by {run.requested_by_username}.</p>}
+                                        {run.error_message && <p className={styles.syncError}>{run.error_message}</p>}
+                                        {run.failures?.map(failure => (
+                                            <p key={failure.station_id} className={styles.syncError}>
+                                                <Link to={`/stations/${encodeURIComponent(failure.station_id)}`}>{failure.station_name || failure.station_id}</Link>
+                                                : {failure.error_message || 'Synchronization failed.'}
+                                            </p>
+                                        ))}
+                                    </div>
+                                </details>
+                            ))}
+                            <div className={styles.syncPagination}>
+                                <span>
+                                    Page {syncPagination.page} of {syncPagination.totalPages} · {syncPagination.total} runs
+                                </span>
+                                <div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSyncPage(page => Math.max(1, page - 1))}
+                                        disabled={syncPagination.page <= 1}
+                                    >
+                                        Previous
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSyncPage(page => Math.min(syncPagination.totalPages, page + 1))}
+                                        disabled={syncPagination.page >= syncPagination.totalPages}
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <div className={styles.section}>
@@ -417,29 +570,6 @@ const Configuration = () => {
 
                                     {provider.isActive && (
                                         <div className={styles.syncBox}>
-                                            {provider.name !== 'WAGTECH' && (
-                                                <div style={{ display: 'grid', gap: '8px', marginBottom: '16px' }}>
-                                                    {provider.name === 'PULSOWEB' && (
-                                                        <button
-                                                            className={styles.syncBtn}
-                                                            onClick={() => handleTestProvider(provider.name)}
-                                                            disabled={testingProvider === provider.name}
-                                                        >
-                                                            {testingProvider === provider.name ? 'Testing PulsoWeb...' : 'Test PulsoWeb Connection'}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        className={styles.syncBtn}
-                                                        onClick={() => handleImportProviderStations(provider.name)}
-                                                        disabled={importingStations !== null}
-                                                    >
-                                                        {importingStations === provider.name ? 'Importing & Detecting Locations...' : 'Import Stations & Detect Locations'}
-                                                    </button>
-                                                    <p style={{ color: '#6b7280', fontSize: '0.75rem', margin: 0 }}>
-                                                        Missing State/LGA values are detected from coordinates through OpenStreetMap Nominatim and cached locally.
-                                                    </p>
-                                                </div>
-                                            )}
                                             {provider.name === 'WAGTECH' && (
                                                 <p style={{ color: '#6b7280', fontSize: '0.75rem', margin: '0 0 16px' }}>
                                                     WAGTECH stations are discovered from FTP files. State/LGA is detected automatically after real coordinates are saved on the station page.
@@ -491,28 +621,6 @@ const Configuration = () => {
                         ))}
                     </div>
                 )}
-            </div>
-
-            <div className={styles.section}>
-                <div className={styles.sectionHeader}>
-                    <Database size={20} />
-                    <h2>Variable Mappings</h2>
-                </div>
-                <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '14px' }}>
-                    Configure how external provider keys map to your internal database fields.
-                </p>
-                <MappingManager />
-            </div>
-
-            <div className={styles.section}>
-                <div className={styles.sectionHeader}>
-                    <Database size={20} />
-                    <h2>PulsoWeb Metadata Explorer</h2>
-                </div>
-                <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '14px' }}>
-                    Browse live granularities, observation codes, units, and the stations reporting each observation.
-                </p>
-                <PulsoWebMetadataExplorer enabled={Boolean(providers.find((provider: { name: string; isActive: boolean }) => provider.name === 'PULSOWEB')?.isActive)} />
             </div>
 
             <div className={styles.section}>

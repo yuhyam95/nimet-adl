@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import Stations from './pages/Stations';
 import StationDetails from './pages/StationDetails';
 import Configuration from './pages/Configuration';
+import ConfigurationMappings from './pages/ConfigurationMappings';
+import ConfigurationMetadata from './pages/ConfigurationMetadata';
 import Wis2box from './pages/Wis2box';
 import UserManagement from './pages/UserManagement';
 import Profile from './pages/Profile';
@@ -58,6 +60,18 @@ function App() {
             <Route path="/configuration" element={
               <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
                 <MainLayout><Configuration /></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/configuration/mappings" element={
+              <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
+                <MainLayout><ConfigurationMappings /></MainLayout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/configuration/pulsoweb-metadata" element={
+              <ProtectedRoute allowedRoles={['Admin', 'Data Manager']}>
+                <MainLayout><ConfigurationMetadata /></MainLayout>
               </ProtectedRoute>
             } />
 

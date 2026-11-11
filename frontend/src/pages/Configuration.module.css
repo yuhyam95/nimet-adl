@@ -386,3 +386,307 @@
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
+.syncTrackerCard {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 22px;
+    min-width: 0;
+}
+
+.syncTrackerIntro {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+.liveBadge,
+.runningStatus {
+    align-items: center;
+    background: #eff6ff;
+    border-radius: 999px;
+    color: #1d4ed8;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    font-weight: 700;
+    gap: 6px;
+    margin-left: auto;
+    padding: 6px 10px;
+}
+
+.liveBadge svg,
+.runningStatus svg {
+    animation: spin 1.25s linear infinite;
+}
+
+.activeSyncGrid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    margin-top: 18px;
+}
+
+.activeSyncCard {
+    background: #f8fafc;
+    border: 1px solid #dbeafe;
+    border-radius: 12px;
+    min-width: 0;
+    padding: 16px;
+}
+
+.syncRunHeader,
+.syncProgressMeta,
+.syncCurrentWork {
+    align-items: center;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+}
+
+.syncRunHeader > div {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.syncRunHeader strong {
+    color: #111827;
+    font-size: 1rem;
+}
+
+.syncRunHeader span:not(.runningStatus) {
+    color: #6b7280;
+    font-size: 0.75rem;
+}
+
+.progressTrack {
+    background: #dbe4f0;
+    border-radius: 999px;
+    height: 8px;
+    margin: 16px 0 8px;
+    overflow: hidden;
+}
+
+.progressTrack span {
+    background: linear-gradient(90deg, #2563eb, #0ea5e9);
+    border-radius: inherit;
+    display: block;
+    height: 100%;
+    transition: width 0.3s ease;
+}
+
+.syncProgressMeta,
+.syncCurrentWork {
+    color: #475569;
+    font-size: 0.78rem;
+}
+
+.syncCurrentWork {
+    border-top: 1px solid #e2e8f0;
+    margin-top: 12px;
+    padding-top: 10px;
+}
+
+.syncCurrentWork span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.syncCounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.syncCounts span {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    color: #475569;
+    font-size: 0.7rem;
+    padding: 4px 8px;
+}
+
+.syncIdle {
+    align-items: center;
+    color: #047857;
+    display: flex;
+    font-size: 0.875rem;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.syncHistory {
+    border-top: 1px solid #e5e7eb;
+    margin-top: 20px;
+    padding-top: 16px;
+}
+
+.syncHistory h3 {
+    color: #374151;
+    font-size: 0.85rem;
+    margin: 0 0 10px;
+    text-transform: uppercase;
+}
+
+.syncHistoryItem {
+    border-top: 1px solid #f1f5f9;
+}
+
+.syncHistoryItem:first-of-type {
+    border-top: 0;
+}
+
+.syncHistoryItem summary {
+    align-items: center;
+    cursor: pointer;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: auto minmax(120px, 1fr) minmax(150px, auto) minmax(155px, auto);
+    list-style: none;
+    padding: 11px 4px;
+}
+
+.syncHistoryItem summary::-webkit-details-marker {
+    display: none;
+}
+
+.syncResultIcon {
+    display: inline-flex;
+}
+
+.completed { color: #059669; }
+.partial { color: #d97706; }
+.failed { color: #dc2626; }
+
+.syncHistoryIdentity {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.syncHistoryIdentity strong {
+    color: #1f2937;
+    font-size: 0.875rem;
+}
+
+.syncHistoryIdentity small,
+.syncHistoryCounts,
+.syncHistoryItem time {
+    color: #6b7280;
+    font-size: 0.75rem;
+}
+
+.syncHistoryItem time {
+    text-align: right;
+}
+
+.syncHistoryDetails {
+    background: #f8fafc;
+    border-radius: 8px;
+    color: #475569;
+    font-size: 0.8rem;
+    margin: 0 4px 12px 32px;
+    padding: 12px;
+}
+
+.syncHistoryDetails p {
+    margin: 4px 0;
+}
+
+.syncError {
+    color: #b91c1c;
+    overflow-wrap: anywhere;
+}
+
+.syncError a {
+    color: inherit;
+    font-weight: 700;
+}
+
+.syncPagination {
+    align-items: center;
+    border-top: 1px solid #e5e7eb;
+    color: #6b7280;
+    display: flex;
+    font-size: 0.78rem;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding-top: 14px;
+}
+
+.syncPagination > div {
+    display: flex;
+    gap: 8px;
+}
+
+.syncPagination button {
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    color: #374151;
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 7px 11px;
+}
+
+.syncPagination button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+@media (max-width: 700px) {
+    .syncTrackerCard {
+        padding: 16px;
+    }
+
+    .sectionHeader {
+        flex-wrap: wrap;
+    }
+
+    .liveBadge {
+        margin-left: 0;
+    }
+
+    .activeSyncGrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .syncRunHeader,
+    .syncCurrentWork {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .runningStatus {
+        margin-left: 0;
+    }
+
+    .syncHistoryItem summary {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .syncHistoryCounts,
+    .syncHistoryItem time {
+        grid-column: 2;
+        text-align: left;
+    }
+
+    .syncHistoryDetails {
+        margin-left: 0;
+    }
+
+    .syncPagination {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .syncPagination button {
+        flex: 1;
+    }
+}

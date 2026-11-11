@@ -2,7 +2,13 @@ const axios = require('axios');
 const config = require('../config/index.js');
 const { applyConversionFormula, normalizeInternalField } = require('../utils/variableMappings.js');
 
+function normalizeCollection(collection) {
+    return typeof collection === 'string' && collection.trim() ? collection.trim() : 'raw';
+}
+
 module.exports = {
+    normalizeCollection,
+
     fetchDataLoggers: async () => {
         try {
             const auth = Buffer.from(`${config.tahmo.apiKey}:${config.tahmo.apiSecret}`).toString('base64');
@@ -40,6 +46,7 @@ module.exports = {
     fetchWeatherData: async (startDate, endDate, stationId, collection = 'raw') => {
         try {
             const auth = Buffer.from(`${config.tahmo.apiKey}:${config.tahmo.apiSecret}`).toString('base64');
+            const collectionName = normalizeCollection(collection);
 
             // TAHMO v2 expects ISO8601 timestamps. If only dates are provided, append time.
             let start = startDate;
@@ -49,7 +56,7 @@ module.exports = {
 
             // TAHMO v2 measurements endpoint:
             // {{baseURL}}/measurements/v2/stations/[stationCode]/measurements/[collection]
-            const url = `${config.tahmo.baseUrl}/measurements/v2/stations/${stationId}/measurements/${collection}`;
+            const url = `${config.tahmo.baseUrl}/measurements/v2/stations/${stationId}/measurements/${collectionName}`;
 
             // console.log(`Fetching TAHMO data from: ${url}?start=${start}&end=${end}`);
 
