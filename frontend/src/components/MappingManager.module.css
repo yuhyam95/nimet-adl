@@ -64,6 +64,9 @@
 
 .content {
     min-height: 200px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .loading {
@@ -75,6 +78,7 @@
 .table {
     width: 100%;
     border-collapse: collapse;
+    min-width: 680px;
 }
 
 .table th {
@@ -175,4 +179,29 @@
     background: rgba(0,0,0,0.05);
     padding: 1px 4px;
     border-radius: 3px;
+}
+
+@media (max-width: 700px) {
+    .header {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+    }
+
+    .tabs {
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+
+    .tab,
+    .activeTab {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    .addBtn {
+        justify-content: center;
+        width: 100%;
+    }
 }

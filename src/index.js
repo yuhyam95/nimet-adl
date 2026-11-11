@@ -6,6 +6,7 @@ const tahmoService = require('./services/tahmo.js');
 const pulsowebService = require('./services/pulsoweb.js');
 const { processFtpData } = require('./services/ftpImporter.js');
 const { reverseGeocode } = require('./services/geocoding.js');
+const syncTracker = require('./services/syncTracker.js');
 const { validateStationInput, validateCoordinates } = require('./utils/stationSecurity.js');
 
 const providerServices = {
@@ -326,7 +327,8 @@ const syncData = async (shouldClosePool = false) => {
         for (const provider of providers) {
             console.log(`Starting periodic data sync for provider: ${provider} (last 48h)...`);
             await syncProviderData(provider, fortyEightHoursAgo, today, {
-                incremental: provider === 'PULSOWEB'
+                incremental: provider === 'PULSOWEB',
+                triggerType: 'automatic'
             }).catch(err => {
                 console.error(`Error during periodic sync for ${provider}:`, err.message);
             });
@@ -359,25 +361,50 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
     const normalizedProvider = String(providerName || '').toUpperCase();
     const providerService = providerServices[normalizedProvider];
     if (!providerService) throw new Error(`Unsupported provider: ${providerName}`);
-    
+
+    let runId = options.runId || null;
     try {
+        if (!runId && options.track !== false) {
+            const run = await syncTracker.createSyncRun({
+                provider: normalizedProvider,
+                triggerType: options.triggerType || 'automatic',
+                startDate,
+                endDate,
+                requestedBy: options.requestedBy
+            });
+            runId = run.id;
+        }
+        if (runId) await syncTracker.startRun(runId);
+
         const loggersResponse = await providerService.fetchDataLoggers();
         if (!loggersResponse || !loggersResponse.data) {
             throw new Error(`Failed to fetch loggers for ${providerName}`);
         }
 
         const loggers = loggersResponse.data;
+        if (runId) await syncTracker.setRunStations(runId, loggers.length);
         console.log(`Found ${loggers.length} loggers for ${normalizedProvider}. Syncing range: ${startDate} to ${endDate}`);
 
-        for (const logger of loggers) {
+        for (let loggerIndex = 0; loggerIndex < loggers.length; loggerIndex += 1) {
+            const logger = loggers[loggerIndex];
+            const trackedStationId = String(logger?._id || logger?.sourceStationId || `unknown-${loggerIndex + 1}`);
+            if (runId) {
+                await syncTracker.startStation(runId, trackedStationId, logger?.stationName);
+            }
             try {
                 // Upsert station metadata
                 const upsertedStation = await upsertProviderStation(logger, normalizedProvider);
                 const stationSourceTimezone = upsertedStation.rows[0]?.source_timezone || logger.sourceTimezone;
                 const stationCollectionStart = upsertedStation.rows[0]?.collection_start_at || logger.collectionStartAt;
 
-                if (upsertedStation.rows[0]?.is_quarantined) continue;
-                if (!logger.isActive) continue;
+                if (upsertedStation.rows[0]?.is_quarantined) {
+                    if (runId) await syncTracker.finishStation(runId, trackedStationId, 'skipped', 'Station is quarantined.');
+                    continue;
+                }
+                if (!logger.isActive) {
+                    if (runId) await syncTracker.finishStation(runId, trackedStationId, 'skipped', 'Station is inactive.');
+                    continue;
+                }
 
                 let effectiveStartDate = startDate;
                 let effectiveEndDate = endDate;
@@ -442,17 +469,26 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                 }
 
                 let latestInsertedTimestamp = null;
-                for (const range of timeRanges) {
+                if (runId) await syncTracker.setStationChunks(runId, trackedStationId, 0, timeRanges.length, 0);
+                for (let rangeIndex = 0; rangeIndex < timeRanges.length; rangeIndex += 1) {
+                    const range = timeRanges[rangeIndex];
+                    if (runId) {
+                        await syncTracker.setStationChunks(
+                            runId, trackedStationId, rangeIndex + 1, timeRanges.length, rangeIndex
+                        );
+                    }
+                    const providerOptions = normalizedProvider === 'PULSOWEB'
+                        ? { timezone: stationSourceTimezone }
+                        : undefined;
                     const apiResponse = await providerService.fetchWeatherData(
                         range.start,
                         range.end,
                         logger.sourceStationId || logger._id,
-                        { timezone: stationSourceTimezone }
+                        providerOptions
                     );
                     const readings = apiResponse?.data?.readings;
-                    if (!readings || readings.length === 0) continue;
-
-                    for (const record of readings) {
+                    let processedInRange = 0;
+                    for (const record of readings || []) {
                         const {
                             timestamp, airTemperature, relativeHumidity, windSpeed, 
                             windDirection, precipitation, solarRadiation, 
@@ -510,6 +546,7 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                         `;
                         try {
                             await db.query(insertQuery, params);
+                            processedInRange += 1;
                             if (!latestInsertedTimestamp || new Date(timestamp) > new Date(latestInsertedTimestamp)) {
                                 latestInsertedTimestamp = timestamp;
                             }
@@ -518,6 +555,12 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                                 console.error(`Insert error for ${logger._id}: ${e.message}`);
                             }
                         }
+                    }
+                    if (runId) {
+                        await syncTracker.addStationReadings(runId, trackedStationId, processedInRange);
+                        await syncTracker.setStationChunks(
+                            runId, trackedStationId, rangeIndex + 1, timeRanges.length, rangeIndex + 1
+                        );
                     }
                 }
 
@@ -546,18 +589,27 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                         }
                     }
                 }
+                if (runId) await syncTracker.finishStation(runId, trackedStationId, 'completed');
             } catch (err) {
                 console.error(`Error processing logger ${logger._id}: ${err.message}`);
+                if (runId) {
+                    await syncTracker.finishStation(runId, trackedStationId, 'failed', err.message).catch(trackerError => {
+                        console.error(`Could not record sync failure for ${trackedStationId}:`, trackerError.message);
+                    });
+                }
             }
         }
 
+        if (runId) await syncTracker.setRunPhase(runId, 'detecting_locations');
         const geocoding = await geocodeProviderStations(normalizedProvider);
         console.log(
             `Location detection for ${normalizedProvider}: ${geocoding.updated} updated, ${geocoding.failed} failed.`
         );
-        return { geocoding };
+        if (runId) await syncTracker.finishRun(runId);
+        return { runId, geocoding };
     } catch (error) {
         console.error(`Sync provider error for ${normalizedProvider}:`, error.message);
+        if (runId) await syncTracker.finishRun(runId, error).catch(() => {});
         throw error;
     }
 };
