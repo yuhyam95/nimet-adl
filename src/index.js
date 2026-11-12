@@ -15,6 +15,193 @@ const providerServices = {
     PULSOWEB: pulsowebService
 };
 
+const configuredOverlapMinutes = Number(process.env.SYNC_OVERLAP_MINUTES || 60);
+const configuredStationConcurrency = Number(process.env.SYNC_STATION_CONCURRENCY || 5);
+const SYNC_OVERLAP_MINUTES = Number.isFinite(configuredOverlapMinutes)
+    ? Math.max(configuredOverlapMinutes, 0)
+    : 60;
+const SYNC_STATION_CONCURRENCY = Number.isFinite(configuredStationConcurrency)
+    ? Math.max(Math.floor(configuredStationConcurrency), 1)
+    : 5;
+const METADATA_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const READING_BATCH_SIZE = 500;
+const providerMetadataRefreshedAt = new Map();
+
+function shouldRefreshProviderMetadata(providerName, now = Date.now()) {
+    const lastRefresh = providerMetadataRefreshedAt.get(providerName);
+    return !lastRefresh || now - lastRefresh >= METADATA_REFRESH_INTERVAL_MS;
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+    let nextIndex = 0;
+    const requestedConcurrency = Number(concurrency);
+    const workerCount = Math.min(
+        Number.isFinite(requestedConcurrency) ? Math.max(Math.floor(requestedConcurrency), 1) : 1,
+        items.length
+    );
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextIndex < items.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            await worker(items[currentIndex], currentIndex);
+        }
+    }));
+}
+
+async function loadProviderStations(providerName) {
+    const result = await db.query(
+        `SELECT station_id, station_name, latitude, longitude, model, location_type,
+                organization, country, last_reading_at, is_active, source_station_id,
+                source_timezone, collection_start_at, is_quarantined
+         FROM stations
+         WHERE provider = $1
+         ORDER BY station_id`,
+        [providerName]
+    );
+
+    return result.rows.map(station => ({
+        _id: station.station_id,
+        sourceStationId: station.source_station_id || station.station_id,
+        sourceTimezone: station.source_timezone,
+        collectionStartAt: station.collection_start_at,
+        stationName: station.station_name,
+        location: {
+            type: station.location_type || 'Point',
+            coordinates: [station.longitude, station.latitude],
+            country: station.country
+        },
+        dataLoggerModel: station.model,
+        organization: { name: station.organization },
+        lastReading: station.last_reading_at,
+        isActive: station.is_active,
+        provider: providerName,
+        cachedStationState: {
+            source_timezone: station.source_timezone,
+            collection_start_at: station.collection_start_at,
+            is_quarantined: station.is_quarantined
+        }
+    }));
+}
+
+function buildIncrementalStart(startDate, latestTimestamp, collectionStartAt, overlapMinutes = SYNC_OVERLAP_MINUTES) {
+    const candidates = [new Date(startDate)];
+    if (latestTimestamp) {
+        candidates.push(new Date(new Date(latestTimestamp).getTime() - overlapMinutes * 60 * 1000));
+    }
+    if (collectionStartAt) candidates.push(new Date(collectionStartAt));
+
+    const validCandidates = candidates.filter(date => !Number.isNaN(date.getTime()));
+    if (validCandidates.length === 0) throw new Error(`Invalid incremental start date: ${startDate}`);
+    return new Date(Math.max(...validCandidates.map(date => date.getTime()))).toISOString();
+}
+
+function readingToParams(logger, record) {
+    const {
+        timestamp, airTemperature, relativeHumidity, windSpeed,
+        windDirection, precipitation, solarRadiation,
+        atmosphericPressure, soilTemperature, batteryVoltage,
+        windGust, lightningStrikeCount, lightningStrikeDistance,
+        xOrientation, yOrientation, humiditySensorTemperature,
+        volumetricWaterContent,
+        ...rest
+    } = record;
+
+    return {
+        timestamp,
+        params: [
+            logger.stationName, logger._id,
+            logger.location?.coordinates?.[1], logger.location?.coordinates?.[0],
+            timestamp, airTemperature, relativeHumidity, windSpeed, windDirection,
+            precipitation, solarRadiation, atmosphericPressure, soilTemperature,
+            batteryVoltage, JSON.stringify(rest), windGust, lightningStrikeCount,
+            lightningStrikeDistance, xOrientation, yOrientation,
+            humiditySensorTemperature, volumetricWaterContent
+        ]
+    };
+}
+
+async function upsertReadingBatch(rows, stationId) {
+    if (rows.length === 0) return { count: 0, latestTimestamp: null };
+    const columnCount = rows[0].params.length;
+    const valuesSql = rows.map((_, rowIndex) => {
+        const offset = rowIndex * columnCount;
+        return `(${Array.from({ length: columnCount }, (__, columnIndex) => `$${offset + columnIndex + 1}`).join(', ')})`;
+    }).join(', ');
+    const params = rows.flatMap(row => row.params);
+
+    try {
+        await db.query(`
+            INSERT INTO weather_readings (
+                station_name, station_id, latitude, longitude, timestamp,
+                air_temperature, relative_humidity, wind_speed, wind_direction,
+                precipitation, solar_radiation, atmospheric_pressure,
+                soil_temperature, battery_voltage, metadata,
+                wind_gust, lightning_strike_count, lightning_strike_distance,
+                x_orientation, y_orientation, humidity_sensor_temperature,
+                volumetric_water_content
+            ) VALUES ${valuesSql}
+            ON CONFLICT (station_id, timestamp) DO UPDATE SET
+                air_temperature = EXCLUDED.air_temperature,
+                relative_humidity = EXCLUDED.relative_humidity,
+                wind_speed = EXCLUDED.wind_speed,
+                wind_direction = EXCLUDED.wind_direction,
+                precipitation = EXCLUDED.precipitation,
+                solar_radiation = EXCLUDED.solar_radiation,
+                atmospheric_pressure = EXCLUDED.atmospheric_pressure,
+                soil_temperature = EXCLUDED.soil_temperature,
+                battery_voltage = EXCLUDED.battery_voltage,
+                wind_gust = EXCLUDED.wind_gust,
+                lightning_strike_count = EXCLUDED.lightning_strike_count,
+                lightning_strike_distance = EXCLUDED.lightning_strike_distance,
+                x_orientation = EXCLUDED.x_orientation,
+                y_orientation = EXCLUDED.y_orientation,
+                humidity_sensor_temperature = EXCLUDED.humidity_sensor_temperature,
+                volumetric_water_content = EXCLUDED.volumetric_water_content,
+                metadata = EXCLUDED.metadata
+        `, params);
+        return { count: rows.length, latestTimestamp: rows.at(-1).timestamp };
+    } catch (error) {
+        if (rows.length === 1) {
+            console.error(`Insert error for ${stationId} at ${rows[0].timestamp}: ${error.message}`);
+            return { count: 0, latestTimestamp: null };
+        }
+
+        const canIsolateBadRow = String(error.code || '').startsWith('22')
+            || ['23502', '23514'].includes(error.code);
+        if (!canIsolateBadRow) throw error;
+
+        const midpoint = Math.ceil(rows.length / 2);
+        const [left, right] = await Promise.all([
+            upsertReadingBatch(rows.slice(0, midpoint), stationId),
+            upsertReadingBatch(rows.slice(midpoint), stationId)
+        ]);
+        const timestamps = [left.latestTimestamp, right.latestTimestamp].filter(Boolean);
+        return {
+            count: left.count + right.count,
+            latestTimestamp: timestamps.sort().at(-1) || null
+        };
+    }
+}
+
+async function upsertReadings(logger, readings) {
+    const now = Date.now();
+    const rows = readings
+        .filter(record => record?.timestamp && new Date(record.timestamp).getTime() <= now)
+        .map(record => readingToParams(logger, record))
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    let count = 0;
+    let latestTimestamp = null;
+    for (let index = 0; index < rows.length; index += READING_BATCH_SIZE) {
+        const result = await upsertReadingBatch(rows.slice(index, index + READING_BATCH_SIZE), logger._id);
+        count += result.count;
+        if (result.latestTimestamp && (!latestTimestamp || new Date(result.latestTimestamp) > new Date(latestTimestamp))) {
+            latestTimestamp = result.latestTimestamp;
+        }
+    }
+    return { count, latestTimestamp };
+}
+
 async function upsertProviderStation(logger, providerName) {
     const { stationId, stationName } = validateStationInput(logger);
     const coordinates = validateCoordinates(
@@ -146,8 +333,8 @@ async function geocodeProviderStations(providerName) {
 }
 
 /**
- * Main periodic sync function
- * Syncs the last 48 hours of data for all providers
+ * Main periodic sync function.
+ * Uses each station's latest reading with a bounded overlap for corrections.
  */
 const syncData = async (shouldClosePool = false) => {
     try {
@@ -325,10 +512,12 @@ const syncData = async (shouldClosePool = false) => {
         const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString().split('T')[0];
 
         for (const provider of providers) {
-            console.log(`Starting periodic data sync for provider: ${provider} (last 48h)...`);
+            const refreshStations = shouldRefreshProviderMetadata(provider);
+            console.log(`Starting incremental data sync for provider: ${provider}...`);
             await syncProviderData(provider, fortyEightHoursAgo, today, {
-                incremental: provider === 'PULSOWEB',
-                triggerType: 'automatic'
+                incremental: true,
+                triggerType: 'automatic',
+                refreshStations
             }).catch(err => {
                 console.error(`Error during periodic sync for ${provider}:`, err.message);
             });
@@ -355,7 +544,7 @@ const syncData = async (shouldClosePool = false) => {
  * @param {string} providerName - configured provider name
  * @param {string} startDate - YYYY-MM-DD
  * @param {string} endDate - YYYY-MM-DD
- * @param {{incremental?: boolean}} options - provider sync options
+ * @param {{incremental?: boolean, refreshStations?: boolean, concurrency?: number}} options - provider sync options
  */
 const syncProviderData = async (providerName, startDate, endDate, options = {}) => {
     const normalizedProvider = String(providerName || '').toUpperCase();
@@ -376,65 +565,91 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
         }
         if (runId) await syncTracker.startRun(runId);
 
-        const loggersResponse = await providerService.fetchDataLoggers();
-        if (!loggersResponse || !loggersResponse.data) {
-            throw new Error(`Failed to fetch loggers for ${providerName}`);
+        const refreshStations = options.refreshStations !== false;
+        let metadataWasRefreshed = refreshStations;
+        let loggers;
+        if (refreshStations) {
+            const loggersResponse = await providerService.fetchDataLoggers();
+            if (!loggersResponse || !Array.isArray(loggersResponse.data)) {
+                throw new Error(`Failed to fetch loggers for ${providerName}`);
+            }
+            loggers = loggersResponse.data;
+            providerMetadataRefreshedAt.set(normalizedProvider, Date.now());
+        } else {
+            loggers = await loadProviderStations(normalizedProvider);
+            if (loggers.length === 0) {
+                const loggersResponse = await providerService.fetchDataLoggers();
+                if (!loggersResponse || !Array.isArray(loggersResponse.data)) {
+                    throw new Error(`Failed to fetch loggers for ${providerName}`);
+                }
+                loggers = loggersResponse.data;
+                providerMetadataRefreshedAt.set(normalizedProvider, Date.now());
+                metadataWasRefreshed = true;
+            }
         }
 
-        const loggers = loggersResponse.data;
+        let latestReadingsByStation = new Map();
+        if (options.incremental && loggers.length > 0) {
+            const latestReadings = await db.query(
+                `SELECT station_id, MAX(timestamp) AS latest_timestamp
+                 FROM weather_readings
+                 WHERE station_id = ANY($1::varchar[])
+                 GROUP BY station_id`,
+                [loggers.map(logger => logger._id)]
+            );
+            latestReadingsByStation = new Map(
+                latestReadings.rows.map(row => [row.station_id, row.latest_timestamp])
+            );
+        }
+
         if (runId) await syncTracker.setRunStations(runId, loggers.length);
         console.log(`Found ${loggers.length} loggers for ${normalizedProvider}. Syncing range: ${startDate} to ${endDate}`);
 
-        for (let loggerIndex = 0; loggerIndex < loggers.length; loggerIndex += 1) {
-            const logger = loggers[loggerIndex];
+        await mapWithConcurrency(loggers, options.concurrency || SYNC_STATION_CONCURRENCY, async (logger, loggerIndex) => {
             const trackedStationId = String(logger?._id || logger?.sourceStationId || `unknown-${loggerIndex + 1}`);
             if (runId) {
                 await syncTracker.startStation(runId, trackedStationId, logger?.stationName);
             }
             try {
-                // Upsert station metadata
-                const upsertedStation = await upsertProviderStation(logger, normalizedProvider);
-                const stationSourceTimezone = upsertedStation.rows[0]?.source_timezone || logger.sourceTimezone;
-                const stationCollectionStart = upsertedStation.rows[0]?.collection_start_at || logger.collectionStartAt;
+                // Metadata is refreshed daily. Incremental runs reuse the stored station state.
+                const stationState = logger.cachedStationState
+                    || (await upsertProviderStation(logger, normalizedProvider)).rows[0];
+                const stationSourceTimezone = stationState?.source_timezone || logger.sourceTimezone;
+                const stationCollectionStart = stationState?.collection_start_at || logger.collectionStartAt;
 
-                if (upsertedStation.rows[0]?.is_quarantined) {
+                if (stationState?.is_quarantined) {
                     if (runId) await syncTracker.finishStation(runId, trackedStationId, 'skipped', 'Station is quarantined.');
-                    continue;
+                    return;
                 }
                 if (!logger.isActive) {
                     if (runId) await syncTracker.finishStation(runId, trackedStationId, 'skipped', 'Station is inactive.');
-                    continue;
+                    return;
                 }
 
                 let effectiveStartDate = startDate;
                 let effectiveEndDate = endDate;
 
-                if (normalizedProvider === 'PULSOWEB' && options.incremental) {
-                    const latestResult = await db.query(
-                        'SELECT MAX(timestamp) AS latest_timestamp FROM weather_readings WHERE station_id = $1',
-                        [logger._id]
+                if (options.incremental) {
+                    const latestTimestamp = latestReadingsByStation.get(logger._id);
+                    effectiveStartDate = buildIncrementalStart(
+                        startDate,
+                        latestTimestamp,
+                        stationCollectionStart
                     );
-                    const latestTimestamp = latestResult.rows[0]?.latest_timestamp;
 
-                    if (latestTimestamp) {
-                        const overlapStart = new Date(new Date(latestTimestamp).getTime() - 5 * 60 * 1000);
-                        const configuredStart = stationCollectionStart ? new Date(stationCollectionStart) : null;
-                        effectiveStartDate = configuredStart && configuredStart > overlapStart
-                            ? configuredStart.toISOString()
-                            : overlapStart.toISOString();
-                    } else if (stationCollectionStart) {
-                        effectiveStartDate = new Date(stationCollectionStart).toISOString();
+                    if (normalizedProvider === 'PULSOWEB') {
+                        const localNow = pulsowebService.formatDateInTimezone(
+                            new Date(),
+                            stationSourceTimezone
+                        );
+                        const completedLocalHour = `${localNow.slice(0, 13)}:00:00`;
+                        effectiveEndDate = pulsowebService.localDateTimeToIso(
+                            completedLocalHour,
+                            stationSourceTimezone
+                        );
+                    } else {
+                        effectiveEndDate = new Date().toISOString();
                     }
-
-                    const localNow = pulsowebService.formatDateInTimezone(
-                        new Date(),
-                        stationSourceTimezone
-                    );
-                    const completedLocalHour = `${localNow.slice(0, 13)}:00:00`;
-                    effectiveEndDate = pulsowebService.localDateTimeToIso(
-                        completedLocalHour,
-                        stationSourceTimezone
-                    );
                 }
 
                 // Split large ranges into chunks to keep upstream requests bounded.
@@ -487,74 +702,12 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                         providerOptions
                     );
                     const readings = apiResponse?.data?.readings;
-                    let processedInRange = 0;
-                    for (const record of readings || []) {
-                        const {
-                            timestamp, airTemperature, relativeHumidity, windSpeed, 
-                            windDirection, precipitation, solarRadiation, 
-                            atmosphericPressure, soilTemperature, batteryVoltage,
-                            windGust, lightningStrikeCount, lightningStrikeDistance,
-                            xOrientation, yOrientation, humiditySensorTemperature,
-                            volumetricWaterContent,
-                            ...rest
-                        } = record;
-
-                        // Skip future timestamps (buggy datalogger clocks)
-                        if (new Date(timestamp) > new Date()) {
-                            continue;
-                        }
-
-                        const params = [
-                            logger.stationName, logger._id,
-                            logger.location?.coordinates?.[1], logger.location?.coordinates?.[0],
-                            timestamp, airTemperature, relativeHumidity, windSpeed, windDirection,
-                            precipitation, solarRadiation, atmosphericPressure, soilTemperature,
-                            batteryVoltage, JSON.stringify(rest), windGust, lightningStrikeCount,
-                            lightningStrikeDistance, xOrientation, yOrientation,
-                            humiditySensorTemperature, volumetricWaterContent
-                        ];
-
-                        const insertQuery = `
-                            INSERT INTO weather_readings (
-                                station_name, station_id, latitude, longitude, timestamp,
-                                air_temperature, relative_humidity, wind_speed, wind_direction,
-                                precipitation, solar_radiation, atmospheric_pressure,
-                                soil_temperature, battery_voltage, metadata,
-                                wind_gust, lightning_strike_count, lightning_strike_distance,
-                                x_orientation, y_orientation, humidity_sensor_temperature,
-                                volumetric_water_content
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-                            ON CONFLICT (station_id, timestamp) DO UPDATE SET
-                                air_temperature = EXCLUDED.air_temperature,
-                                relative_humidity = EXCLUDED.relative_humidity,
-                                wind_speed = EXCLUDED.wind_speed,
-                                wind_direction = EXCLUDED.wind_direction,
-                                precipitation = EXCLUDED.precipitation,
-                                solar_radiation = EXCLUDED.solar_radiation,
-                                atmospheric_pressure = EXCLUDED.atmospheric_pressure,
-                                soil_temperature = EXCLUDED.soil_temperature,
-                                battery_voltage = EXCLUDED.battery_voltage,
-                                wind_gust = EXCLUDED.wind_gust,
-                                lightning_strike_count = EXCLUDED.lightning_strike_count,
-                                lightning_strike_distance = EXCLUDED.lightning_strike_distance,
-                                x_orientation = EXCLUDED.x_orientation,
-                                y_orientation = EXCLUDED.y_orientation,
-                                humidity_sensor_temperature = EXCLUDED.humidity_sensor_temperature,
-                                volumetric_water_content = EXCLUDED.volumetric_water_content,
-                                metadata = EXCLUDED.metadata;
-                        `;
-                        try {
-                            await db.query(insertQuery, params);
-                            processedInRange += 1;
-                            if (!latestInsertedTimestamp || new Date(timestamp) > new Date(latestInsertedTimestamp)) {
-                                latestInsertedTimestamp = timestamp;
-                            }
-                        } catch (e) {
-                            if (!e.message.includes('unique constraint')) {
-                                console.error(`Insert error for ${logger._id}: ${e.message}`);
-                            }
-                        }
+                    const insertResult = await upsertReadings(logger, readings || []);
+                    const processedInRange = insertResult.count;
+                    if (insertResult.latestTimestamp && (
+                        !latestInsertedTimestamp || new Date(insertResult.latestTimestamp) > new Date(latestInsertedTimestamp)
+                    )) {
+                        latestInsertedTimestamp = insertResult.latestTimestamp;
                     }
                     if (runId) {
                         await syncTracker.addStationReadings(runId, trackedStationId, processedInRange);
@@ -578,10 +731,12 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                 if (fullStationRes.rows.length > 0) {
                     const fullStation = fullStationRes.rows[0];
                     if (fullStation.wigos_id && fullStation.share_to_wis2box) {
-                        const endDateTime = endDate.includes('T') ? endDate : endDate + 'T23:59:59';
+                        const endDateTime = effectiveEndDate.includes('T')
+                            ? effectiveEndDate
+                            : effectiveEndDate + 'T23:59:59';
                         const dbReadingsResult = await db.query(
                             'SELECT * FROM weather_readings WHERE station_id = $1 AND timestamp >= $2 AND timestamp <= $3',
-                            [logger._id, startDate, new Date(endDateTime).toISOString()]
+                            [logger._id, effectiveStartDate, new Date(endDateTime).toISOString()]
                         );
                         if (dbReadingsResult.rows.length > 0) {
                             const { dispatchToWis2box } = require('./services/wis2box.js');
@@ -598,13 +753,16 @@ const syncProviderData = async (providerName, startDate, endDate, options = {}) 
                     });
                 }
             }
-        }
+        });
 
-        if (runId) await syncTracker.setRunPhase(runId, 'detecting_locations');
-        const geocoding = await geocodeProviderStations(normalizedProvider);
-        console.log(
-            `Location detection for ${normalizedProvider}: ${geocoding.updated} updated, ${geocoding.failed} failed.`
-        );
+        let geocoding = { attempted: 0, updated: 0, failed: 0, skipped: true };
+        if (metadataWasRefreshed) {
+            if (runId) await syncTracker.setRunPhase(runId, 'detecting_locations');
+            geocoding = await geocodeProviderStations(normalizedProvider);
+            console.log(
+                `Location detection for ${normalizedProvider}: ${geocoding.updated} updated, ${geocoding.failed} failed.`
+            );
+        }
         if (runId) await syncTracker.finishRun(runId);
         return { runId, geocoding };
     } catch (error) {
@@ -618,4 +776,10 @@ if (require.main === module) {
     syncData(true);
 }
 
-module.exports = { importProviderStations, geocodeProviderStations, syncData, syncProviderData };
+module.exports = {
+    importProviderStations,
+    geocodeProviderStations,
+    syncData,
+    syncProviderData,
+    __test: { buildIncrementalStart, mapWithConcurrency, upsertReadings }
+};
