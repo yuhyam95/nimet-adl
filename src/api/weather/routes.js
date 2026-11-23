@@ -163,6 +163,14 @@ function createWeatherRouter({ db, authorize }) {
                     { supportedParameters: listParameters().map(item => item.name) }
                 );
             }
+            if (!parameter.exposed) {
+                return sendError(
+                    res,
+                    422,
+                    'PARAMETER_NOT_AVAILABLE',
+                    'This parameter is not available through the normalized weather API.'
+                );
+            }
 
             const query = parseParameterObservationsQuery(req.query);
             let station;

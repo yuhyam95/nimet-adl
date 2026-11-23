@@ -5,14 +5,10 @@ value ranges, ingestion mappings, and manufacturer documentation.
 
 ## API contract
 
-`GET /weather/v1/parameters` returns:
-
-- `unitStatus: validated` when the stored field has a consistent unit contract.
-- `unitStatus: mixed` when providers or historical periods use different scales.
-- `unitStatus: unverified` when the source feed does not establish a reliable unit.
-
-A mixed or unverified parameter deliberately returns `unit: null`. Consumers
-must not infer a unit from the field name.
+`GET /weather/v1/parameters` exposes only parameters that can be returned in a
+canonical unit. Provider-scale differences are normalized before output.
+Unverified parameters are omitted and direct requests return
+`PARAMETER_NOT_AVAILABLE`.
 
 ## Validated units
 
@@ -31,8 +27,8 @@ must not infer a unit from the field name.
 
 | Parameter | Status | Finding |
 |---|---|---|
-| Relative humidity | Mixed | TAHMO metadata is dimensionless and stored history mixes fractions near 0–1 with values on a 0–100 scale. Other providers publish percent. |
-| Atmospheric pressure | Mixed | TAHMO declares kPa and stored TAHMO values are near 95–101. BARANI/WAGTECH values are near 560–1090, consistent with hPa. |
+| Relative humidity | Normalized | Values on a 0–1 fractional scale are multiplied by 100; values already on a 0–100 scale are retained; invalid values become null. |
+| Atmospheric pressure | Normalized | Values on a 50–120 kPa scale are multiplied by 10; values on a 500–1200 hPa scale are retained; invalid values become null. |
 | Volumetric water content | Unverified | Stored CLIMDES values include negative and implausibly large values; no canonical unit can be asserted. |
 | Soil electrical conductivity | Unverified | Stored values exist but the CLIMDES feed does not provide a unit contract. |
 | Soil pH | Unverified | Current stored records are placeholders (zero) and are not a usable measurement contract. |
@@ -44,8 +40,8 @@ must not infer a unit from the field name.
 - TAHMO relative-humidity scale changes occur within historical station series.
 - Pressure must be normalized per provider before it is used in a combined
   FarmCast calculation.
-- FarmCast rules must reject `mixed` and `unverified` inputs until a
-  provider-aware normalization and quality-control layer is implemented.
+- FarmCast receives only canonical normalized values. Unverified inputs remain
+  unavailable until their provider contracts are established.
 
 ## References
 

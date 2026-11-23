@@ -104,8 +104,9 @@ Available endpoints:
   — observations for one parameter. Coordinates can replace `stationId`; use
   `limit`, `offset`, and `order=asc|desc` for pagination and ordering.
 
-Parameter metadata includes `unitStatus`. Mixed or unverified fields return a
-null unit rather than a misleading universal unit. See
+The public catalogue contains only parameters with a canonical output unit.
+Mixed source scales are normalized before output, while unverified parameters
+are withheld. See
 [`docs/MEASUREMENT_UNITS.md`](docs/MEASUREMENT_UNITS.md) for the validation
 record and known normalization gaps.
 

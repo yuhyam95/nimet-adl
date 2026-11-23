@@ -1,5 +1,6 @@
 const EARTH_RADIUS_KM = 6371;
 const { getParameterDefinition, publicParameterDefinition } = require('./parameters.js');
+const { normalizeMeasurement, normalizedSqlExpression } = require('./normalization.js');
 
 const STATE_FILTER_ALIASES = Object.freeze({
     fct: 'Federal Capital Territory'
@@ -58,15 +59,12 @@ function mapLatestObservation(row) {
         'precipitation',
         'solarRadiation',
         'atmosphericPressure',
-        'soilTemperature',
-        'volumetricWaterContent'
+        'soilTemperature'
     ];
     const metadata = Object.fromEntries(measurementNames.map(name => {
         const definition = getParameterDefinition(name);
         return [name, {
-            unit: definition.unit,
-            unitStatus: definition.unitStatus,
-            unitNote: definition.unitNote || null
+            unit: definition.unit
         }];
     }));
 
@@ -74,15 +72,14 @@ function mapLatestObservation(row) {
         station: mapStation(row),
         observedAt: row.timestamp,
         measurements: {
-            airTemperature: numberOrNull(row.air_temperature),
-            relativeHumidity: numberOrNull(row.relative_humidity),
-            windSpeed: numberOrNull(row.wind_speed),
-            windDirection: numberOrNull(row.wind_direction),
-            precipitation: numberOrNull(row.precipitation),
-            solarRadiation: numberOrNull(row.solar_radiation),
-            atmosphericPressure: numberOrNull(row.atmospheric_pressure),
-            soilTemperature: numberOrNull(row.soil_temperature),
-            volumetricWaterContent: numberOrNull(row.volumetric_water_content)
+            airTemperature: normalizeMeasurement('airTemperature', row.air_temperature),
+            relativeHumidity: normalizeMeasurement('relativeHumidity', row.relative_humidity),
+            windSpeed: normalizeMeasurement('windSpeed', row.wind_speed),
+            windDirection: normalizeMeasurement('windDirection', row.wind_direction),
+            precipitation: normalizeMeasurement('precipitation', row.precipitation),
+            solarRadiation: normalizeMeasurement('solarRadiation', row.solar_radiation),
+            atmosphericPressure: normalizeMeasurement('atmosphericPressure', row.atmospheric_pressure),
+            soilTemperature: normalizeMeasurement('soilTemperature', row.soil_temperature)
         },
         units: Object.fromEntries(
             Object.entries(metadata).map(([name, item]) => [name, item.unit])
@@ -101,8 +98,7 @@ const SUMMARY_VARIABLES = [
     ['precipitation', 'precipitation_count'],
     ['windSpeed', 'wind_speed_count'],
     ['solarRadiation', 'solar_radiation_count'],
-    ['soilTemperature', 'soil_temperature_count'],
-    ['volumetricWaterContent', 'volumetric_water_content_count']
+    ['soilTemperature', 'soil_temperature_count']
 ];
 
 function mapObservationSummary(row, station, start, endExclusive) {
@@ -150,10 +146,6 @@ function mapObservationSummary(row, station, start, endExclusive) {
             soilTemperature: {
                 average: roundedOrNull(row.soil_temperature_avg),
                 ...publicParameterDefinition(getParameterDefinition('soilTemperature'))
-            },
-            volumetricWaterContent: {
-                average: roundedOrNull(row.volumetric_water_content_avg),
-                ...publicParameterDefinition(getParameterDefinition('volumetricWaterContent'))
             }
         },
         coverage: {
@@ -271,8 +263,7 @@ function createWeatherService(db) {
                 wr.precipitation,
                 wr.solar_radiation,
                 wr.atmospheric_pressure,
-                wr.soil_temperature,
-                wr.volumetric_water_content
+                wr.soil_temperature
              FROM stations s
              JOIN LATERAL (
                 SELECT *
@@ -303,8 +294,26 @@ function createWeatherService(db) {
     }
 
     async function getObservationSummary(station, start, endExclusive) {
+        const expression = name => {
+            const definition = getParameterDefinition(name);
+            return normalizedSqlExpression(name, definition.column);
+        };
         const result = await db.query(
-            `SELECT
+            `WITH normalized AS (
+                SELECT
+                    timestamp,
+                    ${expression('airTemperature')} AS air_temperature,
+                    ${expression('relativeHumidity')} AS relative_humidity,
+                    ${expression('precipitation')} AS precipitation,
+                    ${expression('windSpeed')} AS wind_speed,
+                    ${expression('solarRadiation')} AS solar_radiation,
+                    ${expression('soilTemperature')} AS soil_temperature
+                FROM weather_readings
+                WHERE station_id = $1
+                  AND timestamp >= $2
+                  AND timestamp < $3
+            )
+            SELECT
                 COUNT(*) AS reading_count,
                 MIN(timestamp) AS first_observed_at,
                 MAX(timestamp) AS last_observed_at,
@@ -326,13 +335,8 @@ function createWeatherService(db) {
                 COUNT(solar_radiation) AS solar_radiation_count,
                 AVG(solar_radiation) AS solar_radiation_avg,
                 COUNT(soil_temperature) AS soil_temperature_count,
-                AVG(soil_temperature) AS soil_temperature_avg,
-                COUNT(volumetric_water_content) AS volumetric_water_content_count,
-                AVG(volumetric_water_content) AS volumetric_water_content_avg
-             FROM weather_readings
-             WHERE station_id = $1
-               AND timestamp >= $2
-               AND timestamp < $3`,
+                AVG(soil_temperature) AS soil_temperature_avg
+             FROM normalized`,
             [station.id, start, endExclusive]
         );
         return mapObservationSummary(result.rows[0] || {}, station, start, endExclusive);
@@ -349,14 +353,15 @@ function createWeatherService(db) {
     }) {
         // The column and order values come only from server-side allowlists.
         const column = parameter.column;
+        const valueExpression = normalizedSqlExpression(parameter.name, column);
         const direction = order === 'desc' ? 'DESC' : 'ASC';
         const result = await db.query(
-            `SELECT timestamp, ${column} AS value
+            `SELECT timestamp, ${valueExpression} AS value
              FROM weather_readings
              WHERE station_id = $1
                AND timestamp >= $2
                AND timestamp < $3
-               AND ${column} IS NOT NULL
+               AND (${valueExpression}) IS NOT NULL
              ORDER BY timestamp ${direction}
              LIMIT $4 OFFSET $5`,
             [station.id, start, endExclusive, limit + 1, offset]

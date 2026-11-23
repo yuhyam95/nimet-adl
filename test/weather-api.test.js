@@ -22,6 +22,7 @@ const {
     parseApiKeyHashes
 } = require('../src/api/weather/auth.js');
 const { getParameterDefinition, listParameters } = require('../src/api/weather/parameters.js');
+const { normalizeMeasurement, normalizedSqlExpression } = require('../src/api/weather/normalization.js');
 
 function mockResponse() {
     return {
@@ -178,12 +179,24 @@ test('parameter catalogue resolves canonical names and common aliases', () => {
     assert.equal(getParameterDefinition('pressure').name, 'atmosphericPressure');
     assert.equal(getParameterDefinition('rainfall').name, 'precipitation');
     assert.equal(getParameterDefinition('not_a_database_column'), null);
-    assert.ok(listParameters().length >= 20);
-    assert.equal(getParameterDefinition('temperature').unitStatus, 'validated');
-    assert.equal(getParameterDefinition('humidity').unit, null);
-    assert.equal(getParameterDefinition('humidity').unitStatus, 'mixed');
-    assert.equal(getParameterDefinition('pressure').unit, null);
-    assert.equal(getParameterDefinition('soilmoisture').unitStatus, 'unverified');
+    assert.equal(listParameters().length, 19);
+    assert.equal(getParameterDefinition('humidity').unit, 'percent');
+    assert.equal(getParameterDefinition('pressure').unit, 'hPa');
+    assert.equal(getParameterDefinition('soilmoisture').exposed, false);
+    assert.equal(listParameters().some(item => item.name === 'volumetricWaterContent'), false);
+});
+
+test('normalization converts mixed scales and rejects invalid values', () => {
+    assert.equal(normalizeMeasurement('relativeHumidity', 0.75), 75);
+    assert.equal(normalizeMeasurement('relativeHumidity', 75), 75);
+    assert.equal(normalizeMeasurement('relativeHumidity', 110), null);
+    assert.equal(normalizeMeasurement('atmosphericPressure', 98.4), 984);
+    assert.equal(normalizeMeasurement('atmosphericPressure', 1008), 1008);
+    assert.equal(normalizeMeasurement('airTemperature', -9999), null);
+    assert.match(
+        normalizedSqlExpression('atmosphericPressure', 'atmospheric_pressure'),
+        /atmospheric_pressure \* 10/
+    );
 });
 
 test('numeric database values are normalized without converting null to zero', () => {
@@ -301,14 +314,16 @@ test('latest observation exposes normalized measurements and provenance', () => 
         timestamp: '2026-11-17T09:00:00.000Z',
         air_temperature: '28.4',
         relative_humidity: '70',
+        atmospheric_pressure: '98.4',
         precipitation: null
     });
 
     assert.equal(observation.measurements.airTemperature, 28.4);
+    assert.equal(observation.measurements.atmosphericPressure, 984);
     assert.equal(observation.measurements.precipitation, null);
     assert.equal(observation.measurementMetadata.airTemperature.unit, 'degC');
-    assert.equal(observation.measurementMetadata.relativeHumidity.unit, null);
-    assert.equal(observation.measurementMetadata.atmosphericPressure.unitStatus, 'mixed');
+    assert.equal(observation.measurementMetadata.relativeHumidity.unit, 'percent');
+    assert.equal(observation.measurementMetadata.atmosphericPressure.unit, 'hPa');
     assert.deepEqual(observation.provenance, {
         provider: 'TAHMO',
         sourceStationId: 'TA001'
@@ -368,7 +383,7 @@ test('parameter observations use an allowlisted column and cursor-like paginatio
         offset: 0
     });
 
-    assert.match(calls[0].text, /air_temperature AS value/);
+    assert.match(calls[0].text, /CASE WHEN air_temperature BETWEEN -90 AND 60/);
     assert.deepEqual(calls[0].params, [
         'ABUJA-1',
         '2026-11-10T00:00:00.000Z',
@@ -399,6 +414,31 @@ test('versioned router keeps health public and data endpoints protected', () => 
     assert.equal(routes['/observations/latest'], 2);
     assert.equal(routes['/observations/summary'], 2);
     assert.equal(routes['/parameters/:parameter/observations'], 2);
+});
+
+test('unverified parameters are rejected before querying the database', async () => {
+    const db = {
+        async query() {
+            assert.fail('An unavailable parameter must not reach the database.');
+        }
+    };
+    const router = createWeatherRouter({ db, authorize: (req, res, next) => next() });
+    const route = router.stack.find(layer => (
+        layer.route?.path === '/parameters/:parameter/observations'
+    ));
+    const handler = route.route.stack.at(-1).handle;
+    const response = mockResponse();
+
+    await handler({ params: { parameter: 'soilmoisture' }, query: {} }, response);
+
+    assert.equal(response.statusCode, 422);
+    assert.deepEqual(response.body, {
+        success: false,
+        error: {
+            code: 'PARAMETER_NOT_AVAILABLE',
+            message: 'This parameter is not available through the normalized weather API.'
+        }
+    });
 });
 
 test('weather access accepts a configured service API key', () => {
