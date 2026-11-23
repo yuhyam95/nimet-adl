@@ -8,10 +8,11 @@
     "npm": ">=10"
   },
   "scripts": {
-    "test": "node --test test",
+    "test": "node --test test/*.test.js",
     "start": "node src/server.js",
     "sync": "node src/index.js",
-    "reset-password": "node src/db/reset_password.js"
+    "reset-password": "node src/db/reset_password.js",
+    "generate-weather-api-key": "node scripts/generate-weather-api-key.js"
   },
   "author": "Yusuf Habu",
   "license": "ISC",
