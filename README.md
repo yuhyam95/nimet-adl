@@ -88,6 +88,8 @@ dashboard integrations remain backwards compatible.
 
 Available endpoints:
 
+- `GET /weather/docs` — interactive Swagger UI documentation.
+- `GET /weather/openapi.yaml` — machine-readable OpenAPI specification.
 - `GET /weather/v1/health` — public service health and version information.
 - `GET /weather/v1/stations` — paginated non-quarantined station catalogue.
   Optional filters: `provider`, `state`, `lga`, `active`, and `search`.

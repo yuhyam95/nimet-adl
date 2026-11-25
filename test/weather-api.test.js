@@ -23,6 +23,8 @@ const {
 } = require('../src/api/weather/auth.js');
 const { getParameterDefinition, listParameters } = require('../src/api/weather/parameters.js');
 const { normalizeMeasurement, normalizedSqlExpression } = require('../src/api/weather/normalization.js');
+const { createWeatherDocsRouter, loadOpenApiDocument } = require('../src/api/weather/swagger.js');
+const SwaggerParser = require('@apidevtools/swagger-parser');
 
 function mockResponse() {
     return {
@@ -439,6 +441,33 @@ test('unverified parameters are rejected before querying the database', async ()
             message: 'This parameter is not available through the normalized weather API.'
         }
     });
+});
+
+test('OpenAPI document is valid and covers every weather API route', async () => {
+    const document = loadOpenApiDocument();
+    await SwaggerParser.validate(document);
+
+    const router = createWeatherRouter({
+        db: { query: async () => ({ rows: [] }) },
+        authorize: (req, res, next) => next()
+    });
+    const implementedPaths = router.stack
+        .filter(layer => layer.route)
+        .map(layer => `/weather/v1${layer.route.path}`.replace(/:([A-Za-z0-9_]+)/g, '{$1}'))
+        .sort();
+    const documentedPaths = Object.keys(document.paths).sort();
+
+    assert.deepEqual(documentedPaths, implementedPaths);
+    assert.equal(document.components.securitySchemes.ApiKeyAuth.name, 'X-API-Key');
+    assert.deepEqual(document.paths['/weather/v1/health'].get.security, []);
+});
+
+test('weather documentation router exposes Swagger UI and the raw specification', () => {
+    const router = createWeatherDocsRouter();
+    const rawSpecRoute = router.stack.find(layer => layer.route?.path === '/openapi.yaml');
+
+    assert.ok(rawSpecRoute);
+    assert.ok(router.stack.length > 1);
 });
 
 test('weather access accepts a configured service API key', () => {

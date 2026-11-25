@@ -16,6 +16,7 @@ const { mountFrontend } = require('./utils/frontend.js');
 const syncTracker = require('./services/syncTracker.js');
 const { createWeatherRouter } = require('./api/weather/routes.js');
 const { createWeatherAccessMiddleware } = require('./api/weather/auth.js');
+const { createWeatherDocsRouter } = require('./api/weather/swagger.js');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -84,6 +85,7 @@ let systemStatus = {
 
 // Versioned, consumption-oriented weather API. Existing administrative API
 // routes remain under /api for backwards compatibility.
+app.use('/weather', createWeatherDocsRouter());
 app.use('/weather/v1', createWeatherRouter({
     db,
     authorize: createWeatherAccessMiddleware()
