@@ -73,7 +73,7 @@ paths:
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/Unauthorized' 
   /weather/v1/stations/nearest:
     get:
       tags: [Stations]
