@@ -1,0 +1,756 @@
+openapi: 3.1.0
+info:
+  title: NiMet Weather API
+  version: 1.0.0
+  description: |
+    Versioned, consumption-oriented access to normalized NiMet weather observations.
+    Public measurements use the canonical units declared in each response. Source
+    records are not modified by normalization.
+  contact:
+    name: Nigerian Meteorological Agency
+servers:
+  - url: https://api.nimet.gov.ng
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Service
+  - name: Stations
+  - name: Observations
+  - name: Parameters
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+paths:
+  /weather/v1/health:
+    get:
+      tags: [Service]
+      summary: Check API availability
+      operationId: getWeatherApiHealth
+      security: []
+      responses:
+        '200':
+          description: The weather API is online.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /weather/v1/parameters:
+    get:
+      tags: [Parameters]
+      summary: List supported public parameters
+      description: Returns only parameters that have a canonical public output unit.
+      operationId: listWeatherParameters
+      responses:
+        '200':
+          description: Supported parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParameterListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /weather/v1/stations:
+    get:
+      tags: [Stations]
+      summary: List weather stations
+      operationId: listWeatherStations
+      parameters:
+        - $ref: '#/components/parameters/Provider'
+        - $ref: '#/components/parameters/State'
+        - $ref: '#/components/parameters/Lga'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/Active'
+        - $ref: '#/components/parameters/StationLimit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated station catalogue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StationListResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /weather/v1/stations/nearest:
+    get:
+      tags: [Stations]
+      summary: Find nearest active stations
+      operationId: findNearestWeatherStations
+      parameters:
+        - $ref: '#/components/parameters/LatitudeRequired'
+        - $ref: '#/components/parameters/LongitudeRequired'
+        - $ref: '#/components/parameters/RadiusKm'
+        - name: limit
+          in: query
+          description: Maximum number of stations to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 1
+      responses:
+        '200':
+          description: Stations ordered from nearest to farthest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NearestStationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /weather/v1/observations/latest:
+    get:
+      tags: [Observations]
+      summary: Get the latest station observation
+      operationId: getLatestWeatherObservation
+      parameters:
+        - $ref: '#/components/parameters/StationIdRequired'
+      responses:
+        '200':
+          description: Latest normalized observation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LatestObservationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No observation exists for the station.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /weather/v1/observations/summary:
+    get:
+      tags: [Observations]
+      summary: Summarize observations over a period
+      description: |
+        Identify the station using `stationId`, or provide both `latitude` and
+        `longitude` to select the nearest eligible station. Do not combine both
+        location methods. A date-only `end` value is inclusive; the response
+        reports the calculated exclusive boundary as `endExclusive`.
+      operationId: summarizeWeatherObservations
+      parameters:
+        - $ref: '#/components/parameters/StationIdOptional'
+        - $ref: '#/components/parameters/LatitudeOptional'
+        - $ref: '#/components/parameters/LongitudeOptional'
+        - $ref: '#/components/parameters/RadiusKm'
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/End'
+      responses:
+        '200':
+          description: Normalized aggregates and coverage information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObservationSummaryResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/StationNotFound'
+  /weather/v1/parameters/{parameter}/observations:
+    get:
+      tags: [Parameters, Observations]
+      summary: Get observations for one parameter
+      description: |
+        Returns normalized values for a supported public parameter. Identify the
+        station using `stationId`, or provide both `latitude` and `longitude`.
+      operationId: getParameterObservations
+      parameters:
+        - name: parameter
+          in: path
+          required: true
+          description: Canonical parameter name or documented alias.
+          schema:
+            type: string
+          example: temperature
+        - $ref: '#/components/parameters/StationIdOptional'
+        - $ref: '#/components/parameters/LatitudeOptional'
+        - $ref: '#/components/parameters/LongitudeOptional'
+        - $ref: '#/components/parameters/RadiusKm'
+        - $ref: '#/components/parameters/Start'
+        - $ref: '#/components/parameters/End'
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Parameter observations and pagination metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParameterObservationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/StationNotFound'
+        '422':
+          description: The known parameter does not yet have a safe public unit contract.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                error:
+                  code: PARAMETER_NOT_AVAILABLE
+                  message: This parameter is not available through the normalized weather API.
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Dedicated service key issued to an approved consumer such as FarmCast.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: NiMet staff access token.
+  parameters:
+    Provider:
+      name: provider
+      in: query
+      schema:
+        type: string
+        maxLength: 50
+      example: TAHMO
+    State:
+      name: state
+      in: query
+      description: State name. The `State` suffix is optional and `FCT` is accepted.
+      schema:
+        type: string
+        maxLength: 255
+      example: Kano
+    Lga:
+      name: lga
+      in: query
+      description: Local government area. `AMAC` is accepted as an alias.
+      schema:
+        type: string
+        maxLength: 255
+      example: AMAC
+    Search:
+      name: search
+      in: query
+      description: Case-insensitive station ID or name search.
+      schema:
+        type: string
+        maxLength: 100
+    Active:
+      name: active
+      in: query
+      schema:
+        type: boolean
+    StationLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 1000000
+        default: 0
+    LatitudeRequired:
+      name: latitude
+      in: query
+      required: true
+      schema:
+        type: number
+        minimum: -90
+        maximum: 90
+      example: 9.0765
+    LongitudeRequired:
+      name: longitude
+      in: query
+      required: true
+      schema:
+        type: number
+        minimum: -180
+        maximum: 180
+      example: 7.3986
+    LatitudeOptional:
+      name: latitude
+      in: query
+      description: Required together with longitude when stationId is omitted.
+      schema:
+        type: number
+        minimum: -90
+        maximum: 90
+      example: 9.0765
+    LongitudeOptional:
+      name: longitude
+      in: query
+      description: Required together with latitude when stationId is omitted.
+      schema:
+        type: number
+        minimum: -180
+        maximum: 180
+      example: 7.3986
+    RadiusKm:
+      name: radiusKm
+      in: query
+      description: Maximum nearest-station search radius in kilometres.
+      schema:
+        type: number
+        minimum: 1
+        maximum: 500
+        default: 100
+    StationIdRequired:
+      name: stationId
+      in: query
+      required: true
+      schema:
+        type: string
+        maxLength: 255
+      example: TA001
+    StationIdOptional:
+      name: stationId
+      in: query
+      description: Use this or coordinates, but not both.
+      schema:
+        type: string
+        maxLength: 255
+      example: TA001
+    Start:
+      name: start
+      in: query
+      required: true
+      description: ISO 8601 date or timestamp. The maximum period is 366 days.
+      schema:
+        type: string
+      example: '2026-11-10'
+    End:
+      name: end
+      in: query
+      required: true
+      description: ISO 8601 date or timestamp. A date-only value is inclusive.
+      schema:
+        type: string
+      example: '2026-11-17'
+  responses:
+    InvalidRequest:
+      description: One or more request values are invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: INVALID_REQUEST
+              message: latitude must be a number between -90 and 90.
+              details:
+                field: latitude
+                minimum: -90
+                maximum: 90
+    Unauthorized:
+      description: Authentication credentials are missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error:
+              code: AUTHENTICATION_REQUIRED
+              message: Provide a bearer token or an X-API-Key header.
+    StationNotFound:
+      description: No eligible weather station was found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    NullableNumber:
+      type: [number, 'null']
+    NullableString:
+      type: [string, 'null']
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          const: false
+        error:
+          $ref: '#/components/schemas/Error'
+    Station:
+      type: object
+      required:
+        - id
+        - name
+        - latitude
+        - longitude
+        - country
+        - state
+        - lga
+        - provider
+        - sourceStationId
+        - active
+        - lastReadingAt
+        - distanceKm
+      properties:
+        id:
+          type: string
+        name:
+          $ref: '#/components/schemas/NullableString'
+        latitude:
+          $ref: '#/components/schemas/NullableNumber'
+        longitude:
+          $ref: '#/components/schemas/NullableNumber'
+        country:
+          $ref: '#/components/schemas/NullableString'
+        state:
+          $ref: '#/components/schemas/NullableString'
+        lga:
+          $ref: '#/components/schemas/NullableString'
+        provider:
+          $ref: '#/components/schemas/NullableString'
+        sourceStationId:
+          $ref: '#/components/schemas/NullableString'
+        active:
+          type: boolean
+        lastReadingAt:
+          type: [string, 'null']
+          format: date-time
+        distanceKm:
+          $ref: '#/components/schemas/NullableNumber'
+    Parameter:
+      type: object
+      required: [name, label, unit, aliases]
+      properties:
+        name:
+          type: string
+          example: airTemperature
+        label:
+          type: string
+          example: Air temperature
+        unit:
+          type: string
+          example: degC
+        aliases:
+          type: array
+          items:
+            type: string
+    Pagination:
+      type: object
+      required: [limit, offset, count, hasMore, nextOffset]
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        count:
+          type: integer
+        hasMore:
+          type: boolean
+        nextOffset:
+          type: [integer, 'null']
+    Provenance:
+      type: object
+      required: [provider, sourceStationId]
+      properties:
+        provider:
+          $ref: '#/components/schemas/NullableString'
+        sourceStationId:
+          $ref: '#/components/schemas/NullableString'
+    Period:
+      type: object
+      required: [start, endExclusive]
+      properties:
+        start:
+          type: string
+          format: date-time
+        endExclusive:
+          type: string
+          format: date-time
+    HealthResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          required: [service, version, status, timestamp]
+          properties:
+            service:
+              const: NiMet Weather API
+            version:
+              const: v1
+            status:
+              const: online
+            timestamp:
+              type: string
+              format: date-time
+    ParameterListResponse:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success:
+          const: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Parameter'
+        meta:
+          type: object
+          required: [count]
+          properties:
+            count:
+              type: integer
+    StationListResponse:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success:
+          const: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Station'
+        meta:
+          type: object
+          required: [pagination, filters]
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+            filters:
+              type: object
+              additionalProperties: true
+    NearestStationResponse:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success:
+          const: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Station'
+        meta:
+          type: object
+          required: [count, query]
+          properties:
+            count:
+              type: integer
+            query:
+              type: object
+              additionalProperties: true
+    MeasurementValues:
+      type: object
+      required:
+        - airTemperature
+        - relativeHumidity
+        - windSpeed
+        - windDirection
+        - precipitation
+        - solarRadiation
+        - atmosphericPressure
+        - soilTemperature
+      properties:
+        airTemperature:
+          $ref: '#/components/schemas/NullableNumber'
+        relativeHumidity:
+          $ref: '#/components/schemas/NullableNumber'
+        windSpeed:
+          $ref: '#/components/schemas/NullableNumber'
+        windDirection:
+          $ref: '#/components/schemas/NullableNumber'
+        precipitation:
+          $ref: '#/components/schemas/NullableNumber'
+        solarRadiation:
+          $ref: '#/components/schemas/NullableNumber'
+        atmosphericPressure:
+          $ref: '#/components/schemas/NullableNumber'
+        soilTemperature:
+          $ref: '#/components/schemas/NullableNumber'
+    MeasurementUnits:
+      type: object
+      required:
+        - airTemperature
+        - relativeHumidity
+        - windSpeed
+        - windDirection
+        - precipitation
+        - solarRadiation
+        - atmosphericPressure
+        - soilTemperature
+      properties:
+        airTemperature: { const: degC }
+        relativeHumidity: { const: percent }
+        windSpeed: { const: m/s }
+        windDirection: { const: degree }
+        precipitation: { const: mm }
+        solarRadiation: { const: W/m2 }
+        atmosphericPressure: { const: hPa }
+        soilTemperature: { const: degC }
+    MeasurementMetadata:
+      type: object
+      additionalProperties:
+        type: object
+        required: [unit]
+        properties:
+          unit:
+            type: string
+    LatestObservationResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          required:
+            - station
+            - observedAt
+            - measurements
+            - units
+            - measurementMetadata
+            - provenance
+          properties:
+            station:
+              $ref: '#/components/schemas/Station'
+            observedAt:
+              type: string
+              format: date-time
+            measurements:
+              $ref: '#/components/schemas/MeasurementValues'
+            units:
+              $ref: '#/components/schemas/MeasurementUnits'
+            measurementMetadata:
+              $ref: '#/components/schemas/MeasurementMetadata'
+            provenance:
+              $ref: '#/components/schemas/Provenance'
+    SummaryMetric:
+      type: object
+      required: [name, label, unit, aliases]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        unit: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        minimum:
+          $ref: '#/components/schemas/NullableNumber'
+        maximum:
+          $ref: '#/components/schemas/NullableNumber'
+        average:
+          $ref: '#/components/schemas/NullableNumber'
+        total:
+          $ref: '#/components/schemas/NullableNumber'
+        aggregation:
+          type: string
+    VariableCoverage:
+      type: object
+      required: [availableCount, missingCount]
+      properties:
+        availableCount: { type: integer }
+        missingCount: { type: integer }
+    ObservationSummaryResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          required: [station, period, summary, coverage, provenance]
+          properties:
+            station:
+              $ref: '#/components/schemas/Station'
+            period:
+              $ref: '#/components/schemas/Period'
+            summary:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/SummaryMetric'
+            coverage:
+              type: object
+              required: [readingCount, firstObservedAt, lastObservedAt, variables]
+              properties:
+                readingCount: { type: integer }
+                firstObservedAt:
+                  type: [string, 'null']
+                  format: date-time
+                lastObservedAt:
+                  type: [string, 'null']
+                  format: date-time
+                variables:
+                  type: object
+                  additionalProperties:
+                    $ref: '#/components/schemas/VariableCoverage'
+            provenance:
+              $ref: '#/components/schemas/Provenance'
+    ParameterObservationResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          required: [station, parameter, period, observations, pagination, provenance]
+          properties:
+            station:
+              $ref: '#/components/schemas/Station'
+            parameter:
+              $ref: '#/components/schemas/Parameter'
+            period:
+              $ref: '#/components/schemas/Period'
+            observations:
+              type: array
+              items:
+                type: object
+                required: [observedAt, value]
+                properties:
+                  observedAt:
+                    type: string
+                    format: date-time
+                  value:
+                    type: number
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+            provenance:
+              $ref: '#/components/schemas/Provenance'

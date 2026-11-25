@@ -8,10 +8,11 @@
     "npm": ">=10"
   },
   "scripts": {
-    "test": "node --test test",
+    "test": "node --test test/*.test.js",
     "start": "node src/server.js",
     "sync": "node src/index.js",
-    "reset-password": "node src/db/reset_password.js"
+    "reset-password": "node src/db/reset_password.js",
+    "generate-weather-api-key": "node scripts/generate-weather-api-key.js"
   },
   "author": "Yusuf Habu",
   "license": "ISC",
@@ -25,6 +26,11 @@
     "jsonwebtoken": "^9.0.3",
     "minio": "^8.0.7",
     "papaparse": "^5.5.4",
-    "pg": "^8.18.0"
+    "pg": "^8.18.0",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0"
   }
 }

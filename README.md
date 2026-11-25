@@ -80,6 +80,76 @@ To run the dashboard:
     ```
 5.  Open `http://localhost:5173` in your browser.
 
+## Versioned weather API
+
+The consumption-oriented weather API is available under `/weather/v1`. It is
+separate from the existing administrative routes under `/api`, so current
+dashboard integrations remain backwards compatible.
+
+Available endpoints:
+
+- `GET /weather/docs` — interactive Swagger UI documentation.
+- `GET /weather/openapi.yaml` — machine-readable OpenAPI specification.
+- `GET /weather/v1/health` — public service health and version information.
+- `GET /weather/v1/stations` — paginated non-quarantined station catalogue.
+  Optional filters: `provider`, `state`, `lga`, `active`, and `search`.
+  State names may omit the `State` suffix; `FCT` and `AMAC` are recognized aliases.
+- `GET /weather/v1/stations/nearest?latitude=9.0765&longitude=7.3986&limit=1&radiusKm=100`
+  — nearest active, non-quarantined stations.
+- `GET /weather/v1/observations/latest?stationId=STATION_ID` — latest normalized
+  observation and source provenance for a station.
+- `GET /weather/v1/observations/summary?latitude=9.0765&longitude=7.3986&start=2026-11-10&end=2026-11-17`
+  — nearest-station weather aggregates and coverage counts for a period of up
+  to 366 days. A `stationId` can be supplied instead of coordinates.
+- `GET /weather/v1/parameters` — supported parameter names, aliases, and units.
+- `GET /weather/v1/parameters/temperature/observations?stationId=STATION_ID&start=2026-11-10&end=2026-11-17`
+  — observations for one parameter. Coordinates can replace `stationId`; use
+  `limit`, `offset`, and `order=asc|desc` for pagination and ordering.
+
+The public catalogue contains only parameters with a canonical output unit.
+Mixed source scales are normalized before output, while unverified parameters
+are withheld. See
+[`docs/MEASUREMENT_UNITS.md`](docs/MEASUREMENT_UNITS.md) for the validation
+record and known normalization gaps.
+
+Weather data endpoints accept the existing JWT read roles (`Admin`, `Data
+Manager`, and `Data Viewer`) or a dedicated service API key. Obtain a staff
+token from `POST /api/auth/login` and send it as a bearer token:
+
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://127.0.0.1:3000/weather/v1/stations/nearest?latitude=9.0765&longitude=7.3986"
+```
+
+For FarmCast or another approved service, generate a key:
+
+```bash
+npm run generate-weather-api-key -- farmcast
+```
+
+The command prints the raw key once and a SHA-256 entry. Store only the hash
+entry in the backend environment; multiple clients are comma-separated:
+
+```env
+WEATHER_API_KEY_HASHES=farmcast:SHA256_HEX_DIGEST,another-client:SHA256_HEX_DIGEST
+```
+
+Restart the backend after changing the environment. The consuming service sends
+the raw key using the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: farmcast.RAW_SECRET" \
+  "http://127.0.0.1:3000/weather/v1/observations/summary?latitude=9.0765&longitude=7.3986&start=2026-11-10&end=2026-11-17"
+```
+
+Treat the raw key like a password. Do not commit it, log it, put it in a mobile
+application, or expose it in browser code. FarmCast's backend should hold the
+key and proxy authorized requests from its clients.
+
+In production, Nginx can route `/weather/v1/` on `api.nimet.gov.ng` to this
+application's configured localhost port while leaving the existing API
+application as the fallback route.
+
 ## Customization
 
 -   **Database Schema**: Modify `src/index.js` and `src/db/index.js` to match your actual database schema.
