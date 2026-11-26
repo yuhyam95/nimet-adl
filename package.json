@@ -31,6 +31,7 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@apidevtools/swagger-parser": "^13.1.0"
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "openapi-types": "^12.1.3"
   }
 }
